@@ -1,0 +1,13 @@
+/* Additional app-specific styles */
+#root {
+  max-width: 100%;
+  margin: 0 auto;
+  text-align: left;
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition-property: color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
