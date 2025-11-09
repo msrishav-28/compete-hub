@@ -18,6 +18,7 @@ class HackalistFetcher(BaseFetcher):
     """Fetches hackathons from Hackalist API."""
     
     def __init__(self):
+        super().__init__("Hackalist")
         self.base_url = "https://www.hackalist.org/api/1.0"
         self.current_year = datetime.now().year
         
@@ -140,19 +141,34 @@ class HackalistFetcher(BaseFetcher):
                         prize = prize_elem.get_text(strip=True)
                     
                     # Create competition object
-                    competition = Competition(
-                        id=f"hackalist_{title.lower().replace(' ', '_')}_{year}",
-                        title=title,
-                        url=url,
-                        start_date=start_date,
-                        end_date=end_date,
-                        category=CompetitionCategory.HACKATHON,
-                        difficulty=DifficultyLevel.INTERMEDIATE,  # Default to intermediate
-                        location=location,
-                        description=description,
-                        prize=prize,
-                        source="Hackalist"
-                    )
+                    competition = Competition()
+                    competition.id = f"hackalist_{title.lower().replace(' ', '_')}_{year}"
+                    competition.title = title
+                    competition.link = url
+                    competition.start_date = start_date
+                    competition.end_date = end_date
+                    competition.category = CompetitionCategory.HACKATHON
+                    competition.difficulty = DifficultyLevel.INTERMEDIATE
+                    competition.location = location
+                    competition.description = description if description else f"Hackathon: {title}"
+                    competition.source = "Hackalist Web Scraping"
+                    competition.platform = "Hackalist"
+                    competition.team_size = "team"
+                    competition.time_commitment = "high"
+                    competition.skills_required = ["Software Development", "Problem Solving", "Teamwork"]
+                    competition.tags = ["hackathon", "innovation"]
+                    competition.portfolio_value = 70
+                    competition.recruitment_potential = True
+                    
+                    # Parse prize if available
+                    if prize and any(c.isdigit() for c in prize):
+                        prize_value = int(''.join(filter(str.isdigit, prize)) or '0')
+                        if prize_value > 0:
+                            competition.prize = {
+                                "type": "cash",
+                                "value": prize_value,
+                                "currency": "USD"
+                            }
                     
                     hackathons.append(competition)
                     
@@ -176,7 +192,7 @@ class HackalistFetcher(BaseFetcher):
             bool: True if valid, False otherwise
         """
         # Basic validation
-        if not competition.title or not competition.url:
+        if not competition.title or not competition.link:
             return False
             
         # Check if the hackathon is in the future
@@ -187,7 +203,7 @@ class HackalistFetcher(BaseFetcher):
     
     def deduplicate(self, competitions: List[Competition]) -> List[Competition]:
         """
-        Deduplicate competitions by URL and title.
+        Deduplicate competitions by link and title.
         
         Args:
             competitions: List of Competition objects
@@ -199,8 +215,8 @@ class HackalistFetcher(BaseFetcher):
         deduped = []
         
         for comp in competitions:
-            # Create a unique key based on title and URL
-            key = (comp.title.lower(), comp.url.lower() if comp.url else "")
+            # Create a unique key based on title and link
+            key = (comp.title.lower(), comp.link.lower() if comp.link else "")
             if key not in seen:
                 seen.add(key)
                 deduped.append(comp)
