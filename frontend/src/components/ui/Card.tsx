@@ -1,8 +1,8 @@
 import { HTMLAttributes, forwardRef } from 'react';
 import { cn } from '../../utils';
-import { motion } from 'framer-motion';
+import { motion, HTMLMotionProps } from 'framer-motion';
 
-interface CardProps extends HTMLAttributes<HTMLDivElement> {
+interface CardProps extends HTMLMotionProps<"div"> {
   hover?: boolean;
   glass?: boolean;
 }
@@ -18,8 +18,8 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
         className={cn(
           'rounded-xl border transition-all duration-300',
           glass
-            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-lg border-white/20'
-            : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700',
+            ? 'bg-white/70 dark:bg-white/5 backdrop-blur-xl border-white/10 text-white'
+            : 'bg-white dark:bg-black border-gray-200 dark:border-white/10',
           hover && 'hover:shadow-xl cursor-pointer',
           'shadow-md',
           className

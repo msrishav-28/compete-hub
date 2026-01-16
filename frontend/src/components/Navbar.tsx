@@ -9,7 +9,7 @@ export default function Navbar() {
   const location = useLocation();
 
   const navItems = [
-    { path: '/', label: 'Discover', icon: TrophyIcon },
+    { path: '/explore', label: 'Explore', icon: TrophyIcon },
     { path: '/dashboard', label: 'Dashboard', icon: ChartBarIcon },
     { path: '/calendar', label: 'Calendar', icon: CalendarIcon },
     { path: '/saved', label: 'Saved', icon: BookmarkIcon },
@@ -19,26 +19,22 @@ export default function Navbar() {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <nav className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800 shadow-sm">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          {/* Logo */}
-          <div className="flex items-center">
-            <Link to="/" className="flex items-center space-x-2 group">
-              <motion.div
-                whileHover={{ rotate: 360 }}
-                transition={{ duration: 0.5 }}
-                className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg"
-              >
-                <TrophyIcon className="h-5 w-5 text-white" />
-              </motion.div>
-              <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                CompeteHub
-              </span>
-            </Link>
-          </div>
+    <>
+      {/* Desktop & Tablet Floating Navbar */}
+      <div className="fixed top-0 left-0 right-0 z-50 flex justify-center py-4 px-4 md:px-0 pointer-events-none">
+        <nav className="pointer-events-auto w-full max-w-5xl bg-black/80 dark:bg-black/90 backdrop-blur-xl border border-white/10 rounded-full shadow-2xl px-6 py-3 flex justify-between items-center transition-all duration-300">
 
-          {/* Navigation Links */}
+          {/* Logo */}
+          <Link to="/" className="flex items-center gap-2 group">
+            <div className="bg-brand-lime p-1.5 rounded-lg text-black group-hover:rotate-12 transition-transform duration-300">
+              <TrophyIcon className="h-5 w-5" />
+            </div>
+            <span className="text-lg font-bold text-white tracking-tight uppercase font-display hidden sm:block">
+              CompeteHub.
+            </span>
+          </Link>
+
+          {/* Desktop Navigation Links (Hidden on Mobile) */}
           <div className="hidden md:flex items-center space-x-1">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -47,38 +43,27 @@ export default function Navbar() {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className="relative px-4 py-2 rounded-lg transition-colors group"
-                >
-                  <div
-                    className={cn(
-                      'flex items-center space-x-2',
-                      active
-                        ? 'text-blue-600 dark:text-blue-400'
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span className="text-sm font-medium">{item.label}</span>
-                  </div>
-                  {active && (
-                    <motion.div
-                      layoutId="activeNav"
-                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-purple-600"
-                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                    />
+                  className={cn(
+                    "relative px-4 py-2 rounded-full transition-all duration-300 group flex items-center gap-2 text-sm font-medium",
+                    active
+                      ? "text-brand-black bg-brand-lime"
+                      : "text-gray-400 hover:text-white hover:bg-white/10"
                   )}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span>{item.label}</span>
                 </Link>
               );
             })}
           </div>
 
-          {/* Theme Toggle */}
+          {/* Theme & Extras */}
           <div className="flex items-center space-x-4">
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={toggleTheme}
-              className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors border border-white/5"
               aria-label="Toggle theme"
             >
               {isDark ? (
@@ -88,8 +73,36 @@ export default function Navbar() {
               )}
             </motion.button>
           </div>
+        </nav>
+      </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-t border-white/10 pb-safe">
+        <div className="flex justify-around items-center h-16 px-2">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={cn(
+                  "flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors",
+                  active ? "text-brand-lime" : "text-gray-500 hover:text-gray-300"
+                )}
+              >
+                <motion.div
+                  initial={false}
+                  animate={active ? { y: -2 } : { y: 0 }}
+                >
+                  <Icon className={cn("h-6 w-6", active && "stroke-2")} />
+                </motion.div>
+                <span className="text-[10px] font-medium tracking-wide">{item.label}</span>
+              </Link>
+            );
+          })}
         </div>
       </div>
-    </nav>
+    </>
   );
 }

@@ -276,6 +276,29 @@ async def get_profile(user_id: str = Query("default_user")):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/users/competition/save")
+async def toggle_save_competition(comp_id: str = Body(..., embed=True), save: bool = Body(..., embed=True), user_id: str = Query("default_user")):
+    """Save or unsave a competition"""
+    try:
+        user_file = USERS_DIR / f"{user_id}.json"
+        
+        if user_file.exists():
+            with open(user_file, 'r') as f:
+                profile_data = json.load(f)
+            profile = UserProfile.from_dict(profile_data)
+        else:
+            profile = UserProfile(user_id=user_id)
+        
+        profile.toggle_saved_competition(comp_id, save)
+        
+        with open(user_file, 'w') as f:
+            json.dump(profile.to_dict(), f, indent=2)
+        
+        return {"success": True, "message": f"Competition {'saved' if save else 'unsaved'}", "saved_competitions": profile.saved_competitions}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/users/competition/enter")
 async def enter_competition(comp_id: str = Body(...), user_id: str = Query("default_user")):
     """Mark a competition as entered"""

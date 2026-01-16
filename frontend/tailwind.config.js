@@ -7,7 +7,15 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+        display: ['Space Grotesk', 'sans-serif'],
+      },
       colors: {
+        brand: {
+          lime: '#a3e635',
+          black: '#000000',
+        },
         primary: {
           50: '#eff6ff',
           100: '#dbeafe',

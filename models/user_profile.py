@@ -39,6 +39,7 @@ class UserProfile:
     })
     
     # Competition History
+    saved_competitions: List[str] = field(default_factory=list)  # List of competition IDs
     competitions_entered: List[Dict] = field(default_factory=list)  # [{comp_id, date_entered, status}]
     competitions_won: List[Dict] = field(default_factory=list)  # [{comp_id, placement, date}]
     
@@ -74,6 +75,7 @@ class UserProfile:
             'specializations': self.specializations,
             'skill_levels': self.skill_levels,
             'linked_profiles': self.linked_profiles,
+            'saved_competitions': self.saved_competitions,
             'competitions_entered': self.competitions_entered,
             'competitions_won': self.competitions_won,
             'portfolio_items': self.portfolio_items,
@@ -96,7 +98,7 @@ class UserProfile:
         
         # Set basic fields
         for field in ['name', 'email', 'college', 'year', 'specializations',
-                     'skill_levels', 'linked_profiles', 'competitions_entered',
+                     'skill_levels', 'linked_profiles', 'saved_competitions', 'competitions_entered',
                      'competitions_won', 'portfolio_items', 'portfolio_visibility',
                      'difficulty_preference', 'time_available_weekly',
                      'preferred_categories', 'preferred_duration', 'goals',
@@ -117,6 +119,16 @@ class UserProfile:
         if skill in self.skill_levels:
             self.skill_levels[skill] = max(0, min(5, level))  # Clamp between 0-5
             self.last_updated = datetime.now()
+
+    def toggle_saved_competition(self, comp_id: str, save: bool) -> None:
+        """Save or unsave a competition."""
+        if save:
+            if comp_id not in self.saved_competitions:
+                self.saved_competitions.append(comp_id)
+        else:
+            if comp_id in self.saved_competitions:
+                self.saved_competitions.remove(comp_id)
+        self.last_updated = datetime.now()
     
     def add_competition_entry(self, comp_id: str, status: str = 'registered') -> None:
         """Add a competition entry to the user's history."""

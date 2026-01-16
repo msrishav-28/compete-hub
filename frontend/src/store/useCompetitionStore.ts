@@ -1,21 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-interface Competition {
-  id: string;
-  title: string;
-  platform: string;
-  category: string;
-  startDate: string;
-  endDate?: string;
-  difficulty: string;
-  timeCommitment: string;
-  prize?: {
-    value: string;
-    currency: string;
-  };
-  tags: string[];
-}
+
 
 interface CompetitionStore {
   savedCompetitions: string[];
@@ -32,6 +18,7 @@ interface CompetitionStore {
   setViewMode: (mode: 'grid' | 'list' | 'calendar') => void;
   setFilters: (filters: Partial<CompetitionStore['filters']>) => void;
   resetFilters: () => void;
+  syncSavedCompetitions: (ids: string[]) => void;
 }
 
 const defaultFilters = {
@@ -47,14 +34,30 @@ export const useCompetitionStore = create<CompetitionStore>()(
       savedCompetitions: [],
       viewMode: 'grid',
       filters: defaultFilters,
-      saveCompetition: (id: string) =>
-        set((state) => ({
-          savedCompetitions: [...state.savedCompetitions, id],
-        })),
-      unsaveCompetition: (id: string) =>
-        set((state) => ({
-          savedCompetitions: state.savedCompetitions.filter((cId) => cId !== id),
-        })),
+      saveCompetition: (id: string) => {
+        set((state) => {
+          if (state.savedCompetitions.includes(id)) return state;
+          // Optimistic update
+          const newSaved = [...state.savedCompetitions, id];
+          // Sync with backend (fire and forget)
+          import('../api/competitions').then(({ saveCompetitionForUser }) => {
+            saveCompetitionForUser(id, true).catch(console.error);
+          });
+          return { savedCompetitions: newSaved };
+        });
+      },
+      unsaveCompetition: (id: string) => {
+        set((state) => {
+          // Optimistic update
+          const newSaved = state.savedCompetitions.filter((cId) => cId !== id);
+          // Sync with backend
+          import('../api/competitions').then(({ saveCompetitionForUser }) => {
+            saveCompetitionForUser(id, false).catch(console.error);
+          });
+          return { savedCompetitions: newSaved };
+        });
+      },
+      syncSavedCompetitions: (ids: string[]) => set({ savedCompetitions: ids }),
       isSaved: (id: string) => get().savedCompetitions.includes(id),
       setViewMode: (mode) => set({ viewMode: mode }),
       setFilters: (filters) =>

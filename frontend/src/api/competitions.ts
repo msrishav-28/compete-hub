@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL 
+const API_BASE_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : 'http://localhost:8000/api';
 
@@ -56,6 +56,7 @@ export interface UserProfile {
   time_available_weekly: number;
   preferred_categories: string[];
   goals: string[];
+  saved_competitions: string[];
   competitions_entered: any[];
   competitions_won: any[];
 }
@@ -139,6 +140,15 @@ export const recordWin = async (compId: string, placement: number, userId: strin
   const response = await axios.post(
     `${API_BASE_URL}/users/competition/win`,
     { comp_id: compId, placement },
+    { params: { user_id: userId } }
+  );
+  return response.data;
+};
+
+export const saveCompetitionForUser = async (compId: string, save: boolean, userId: string = 'default_user') => {
+  const response = await axios.post(
+    `${API_BASE_URL}/users/competition/save`,
+    { comp_id: compId, save },
     { params: { user_id: userId } }
   );
   return response.data;
