@@ -42,7 +42,7 @@ export default function LandingPage() {
                             Hub.
                         </h1>
                         <p className="text-lg md:text-2xl font-medium text-gray-700 dark:text-gray-300 max-w-2xl mx-auto mt-6 tracking-wide px-4">
-                            All the must haves of a professional <span className="bg-lime-400 text-black px-2 py-1 rounded-sm whitespace-nowrap">career accelerator.</span>
+                            The ultimate launchpad for <span className="bg-lime-400 text-black px-2 py-1 rounded-sm whitespace-nowrap">Engineering Students.</span> Discover, track, and win the world's best hackathons.
                         </p>
                     </motion.div>
 
@@ -57,11 +57,11 @@ export default function LandingPage() {
                             onClick={() => navigate('/explore')}
                             className="px-8 py-4 bg-black dark:bg-white text-white dark:text-black font-bold text-lg rounded-full hover:scale-105 transition-transform flex items-center gap-2 group"
                         >
-                            Get Started
+                            Start Competing
                             <ArrowRightIcon className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
                         </button>
                         <button className="px-8 py-4 bg-transparent border-2 border-gray-900 dark:border-white text-black dark:text-white font-bold text-lg rounded-full hover:bg-gray-100 dark:hover:bg-white/10 transition-colors backdrop-blur-sm">
-                            How it works?
+                            View Roadmap
                         </button>
                     </motion.div>
 
@@ -78,7 +78,7 @@ export default function LandingPage() {
                             ))}
                         </div>
                         <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                            <span className="font-bold">2M+</span> World active user
+                            <span className="font-bold">500+</span> Live Competitions
                         </div>
                     </motion.div>
                 </div>
@@ -90,10 +90,10 @@ export default function LandingPage() {
                     transition={{ delay: 0.8 }}
                     className="mt-32"
                 >
-                    <h3 className="text-2xl font-bold mb-8 text-black dark:text-white">Trusted by.</h3>
+                    <h3 className="text-2xl font-bold mb-8 text-black dark:text-white">Used by students from.</h3>
                     <div className="flex flex-wrap gap-8 md:gap-16 items-center opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
                         {/* Placeholders for logos */}
-                        {['Webflow', 'Grammarly', 'Scale', 'Adobe', 'Slack'].map((brand) => (
+                        {['IIT Bombay', 'BITS Pilani', 'NIT Trichy', 'IIIT Hyderabad', 'DTU'].map((brand) => (
                             <span key={brand} className="text-2xl md:text-3xl font-bold text-black dark:text-white">{brand}</span>
                         ))}
                     </div>
@@ -103,19 +103,19 @@ export default function LandingPage() {
                 <div className="mt-32 grid grid-cols-1 md:grid-cols-3 gap-6">
                     {[
                         {
-                            title: "Realtime Collaboration",
+                            title: "Smart Aggregation",
                             icon: <UserGroupIcon className="h-6 w-6" />,
-                            desc: "Work with your team in real-time and set individual permissions."
+                            desc: "We scrape Devpost, Unstop, and Kaggle so you don't have to. Updates daily."
                         },
                         {
-                            title: "Smart Tracking",
+                            title: "AI Matchmaking",
                             icon: <ChartBarIcon className="h-6 w-6" />,
-                            desc: "Track every competition and hackathon with intelligent analytics."
+                            desc: "Get personalized hackathon recommendations based on your GitHub & skills."
                         },
                         {
-                            title: "Templates Library",
+                            title: "Verified Portfolio",
                             icon: <DocumentDuplicateIcon className="h-6 w-6" />,
-                            desc: "A repository of resumes, portfolios, and resources ready to use."
+                            desc: "Automatically convert your competition wins into a verified proof-of-work profile."
                         },
                     ].map((feature, i) => (
                         <motion.div
