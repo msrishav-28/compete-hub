@@ -2,27 +2,36 @@ from fastapi import FastAPI, HTTPException, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 import sys
 import json
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.competition import Competition, CompetitionCategory, DifficultyLevel
 from models.user_profile import UserProfile
-from utils.cache import cache
+from backend.database import connect_to_mongo, close_mongo_connection, get_competitions_collection, get_users_collection, get_database
 from fetchers.coding_contests.codeforces import CodeforcesFetcher
 from fetchers.data_science.kaggle import KaggleFetcher
 from fetchers.corporate.hackerrank import HackerRankFetcher
 from fetchers.hackathons.hackalist import HackalistFetcher
 
+# Lifespan context manager for DB connection
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await connect_to_mongo()
+    yield
+    await close_mongo_connection()
+
 app = FastAPI(
     title="CompeteHub API",
     description="Comprehensive API for discovering, tracking, and analyzing competitions",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 # CORS middleware
@@ -57,28 +66,77 @@ class UserProfileUpdate(BaseModel):
     preferred_categories: Optional[List[str]] = None
     goals: Optional[List[str]] = None
 
-# ===== COMPETITION ENDPOINTS =====
+# ===== COMPETITION HELPER FUNCTIONS =====
 
-def load_all_competitions() -> List[Dict[str, Any]]:
-    """Load all competitions from cache or fetch if needed"""
-    all_competitions = []
-    
+async def is_source_fresh(source: str, ttl_hours: int = 24) -> bool:
+    """Check if a source's data is fresh in the DB metadata collection"""
+    db = get_database()
+    if db is None:
+        return False
+        
+    metadata = await db.metadata.find_one({"_id": source})
+    if not metadata:
+        return False
+        
+    last_updated = metadata.get('last_updated')
+    if not last_updated:
+        return False
+        
+    if isinstance(last_updated, str):
+        last_updated = datetime.fromisoformat(last_updated)
+        
+    return datetime.now() - last_updated < timedelta(hours=ttl_hours)
+
+async def update_source_metadata(source: str):
+    """Update the last_updated timestamp for a source"""
+    db = get_database()
+    if db is not None:
+        await db.metadata.update_one(
+            {"_id": source},
+            {"$set": {"last_updated": datetime.now()}},
+            upsert=True
+        )
+
+async def load_all_competitions() -> List[Dict[str, Any]]:
+    """Load all competitions from DB, fetching fresh data if needed"""
+    comps_col = get_competitions_collection()
+    if comps_col is None:
+        print("Database not connected")
+        return []
+
+    # 1. Fetch fresh data if needed
     for source, fetcher in FETCHERS.items():
         try:
-            if not cache.is_cache_fresh(source, ttl_hours=24):
+            if not await is_source_fresh(source, ttl_hours=24):
                 print(f"Fetching fresh data from {source}...")
                 competitions = fetcher.run()
-                cache.save_competitions(competitions, source)
-            
-            # Load from cache
-            cached_comps = cache.load_competitions(source)
-            if isinstance(cached_comps, list):
-                all_competitions.extend(cached_comps)
+                
+                # Bulk write upsert via individual updates (simple implementation)
+                # Ideally use BulkWrite but this is safer for now
+                for comp in competitions:
+                    comp_dict = comp.to_dict() if hasattr(comp, 'to_dict') else comp
+                    # Ensure ID is present
+                    comp_id = comp_dict.get('id')
+                    if comp_id:
+                        await comps_col.update_one(
+                            {"id": comp_id},
+                            {"$set": comp_dict},
+                            upsert=True
+                        )
+                
+                await update_source_metadata(source)
+                print(f"Updated {source} with {len(competitions)} competitions")
+                
         except Exception as e:
             print(f"Error loading from {source}: {str(e)}")
             continue
     
-    return all_competitions
+    # 2. Return all competitions from DB
+    # Exclude _id from result as it is not serializable by default JSON encoder
+    cursor = comps_col.find({}, {"_id": 0})
+    return await cursor.to_list(length=None)
+
+# ===== COMPETITION ENDPOINTS =====
 
 @app.get("/api/competitions")
 async def get_competitions(
@@ -93,12 +151,11 @@ async def get_competitions(
 ):
     """
     Get filtered and paginated list of competitions.
-    Supports filtering by category, difficulty, time commitment, platform, and search.
     """
     try:
-        all_comps = load_all_competitions()
+        all_comps = await load_all_competitions()
         
-        # Apply filters
+        # Apply filters (In-Memory for now to match previous logic and keep it safe)
         filtered = all_comps
         
         if search:
@@ -127,7 +184,7 @@ async def get_competitions(
             filtered = [c for c in filtered if c.get('recruitment_potential', False)]
         
         # Sort by start date (upcoming first)
-        filtered.sort(key=lambda x: x.get('start_date', ''), reverse=False)
+        filtered.sort(key=lambda x: x.get('start_date', '') or '', reverse=False)
         
         # Pagination
         total = len(filtered)
@@ -144,15 +201,27 @@ async def get_competitions(
         }
         
     except Exception as e:
+        # Log the full error for debugging
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching competitions: {str(e)}")
 
 @app.get("/api/competitions/{competition_id}")
 async def get_competition_by_id(competition_id: str):
     """Get a single competition by ID"""
     try:
-        all_comps = load_all_competitions()
-        comp = next((c for c in all_comps if c.get('id') == competition_id), None)
+        comps_col = get_competitions_collection()
+        if comps_col is None:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+             
+        comp = await comps_col.find_one({"id": competition_id}, {"_id": 0})
         
+        if not comp:
+            # Fallback to load all if not found (maybe it's a fresh fetch)
+            # This mimics previous behavior of checking all sources
+            await load_all_competitions()
+            comp = await comps_col.find_one({"id": competition_id}, {"_id": 0})
+            
         if not comp:
             raise HTTPException(status_code=404, detail="Competition not found")
         
@@ -167,7 +236,9 @@ async def get_competition_by_id(competition_id: str):
 async def get_upcoming_week():
     """Get competitions starting in the next 7 days"""
     try:
-        all_comps = load_all_competitions()
+        # Optimal: Query DB directly for date range
+        # For now, sticking to pattern: load all, filter in memory
+        all_comps = await load_all_competitions()
         now = datetime.now()
         week_later = now + timedelta(days=7)
         
@@ -188,7 +259,7 @@ async def get_upcoming_week():
 async def get_stats_overview():
     """Get overview statistics about competitions"""
     try:
-        all_comps = load_all_competitions()
+        all_comps = await load_all_competitions()
         
         # Calculate statistics
         total = len(all_comps)
@@ -223,36 +294,39 @@ async def get_stats_overview():
 
 # ===== USER PROFILE ENDPOINTS =====
 
-USERS_DIR = Path("data/users")
-USERS_DIR.mkdir(parents=True, exist_ok=True)
-
 @app.post("/api/users/profile")
 async def create_or_update_profile(profile_update: UserProfileUpdate, user_id: str = Query("default_user")):
     """Create or update user profile"""
     try:
-        user_file = USERS_DIR / f"{user_id}.json"
+        users_col = get_users_collection()
+        if users_col is None:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+            
+        # Get existing or create new
+        existing_data = await users_col.find_one({"user_id": user_id}, {"_id": 0})
         
-        # Load existing profile or create new
-        if user_file.exists():
-            with open(user_file, 'r') as f:
-                existing_data = json.load(f)
-            profile = UserProfile.from_dict(existing_data)
+        if existing_data:
+            response_profile = UserProfile.from_dict(existing_data)
         else:
-            profile = UserProfile(user_id=user_id)
+            response_profile = UserProfile(user_id=user_id)
         
         # Update fields
         update_dict = profile_update.dict(exclude_unset=True)
         for key, value in update_dict.items():
-            if hasattr(profile, key):
-                setattr(profile, key, value)
+            if hasattr(response_profile, key):
+                setattr(response_profile, key, value)
         
-        profile.last_updated = datetime.now()
+        response_profile.last_updated = datetime.now()
         
-        # Save
-        with open(user_file, 'w') as f:
-            json.dump(profile.to_dict(), f, indent=2)
+        # Save to DB
+        profile_dict = response_profile.to_dict()
+        await users_col.update_one(
+            {"user_id": user_id},
+            {"$set": profile_dict},
+            upsert=True
+        )
         
-        return {"success": True, "message": "Profile updated successfully", "data": profile.to_dict()}
+        return {"success": True, "message": "Profile updated successfully", "data": profile_dict}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -261,15 +335,16 @@ async def create_or_update_profile(profile_update: UserProfileUpdate, user_id: s
 async def get_profile(user_id: str = Query("default_user")):
     """Get user profile"""
     try:
-        user_file = USERS_DIR / f"{user_id}.json"
+        users_col = get_users_collection()
+        if users_col is None:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+             
+        profile_data = await users_col.find_one({"user_id": user_id}, {"_id": 0})
         
-        if not user_file.exists():
-            # Return default profile
+        if not profile_data:
+            # Return default profile but don't save it until they act
             profile = UserProfile(user_id=user_id)
             return {"success": True, "data": profile.to_dict(), "is_new": True}
-        
-        with open(user_file, 'r') as f:
-            profile_data = json.load(f)
         
         return {"success": True, "data": profile_data, "is_new": False}
         
@@ -280,19 +355,26 @@ async def get_profile(user_id: str = Query("default_user")):
 async def toggle_save_competition(comp_id: str = Body(..., embed=True), save: bool = Body(..., embed=True), user_id: str = Query("default_user")):
     """Save or unsave a competition"""
     try:
-        user_file = USERS_DIR / f"{user_id}.json"
+        users_col = get_users_collection()
+        if users_col is None:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+             
+        existing_data = await users_col.find_one({"user_id": user_id}, {"_id": 0})
         
-        if user_file.exists():
-            with open(user_file, 'r') as f:
-                profile_data = json.load(f)
-            profile = UserProfile.from_dict(profile_data)
+        if existing_data:
+            profile = UserProfile.from_dict(existing_data)
         else:
             profile = UserProfile(user_id=user_id)
         
         profile.toggle_saved_competition(comp_id, save)
         
-        with open(user_file, 'w') as f:
-            json.dump(profile.to_dict(), f, indent=2)
+        # Save updates
+        profile_dict = profile.to_dict()
+        await users_col.update_one(
+            {"user_id": user_id},
+            {"$set": profile_dict},
+            upsert=True
+        )
         
         return {"success": True, "message": f"Competition {'saved' if save else 'unsaved'}", "saved_competitions": profile.saved_competitions}
         
@@ -303,19 +385,26 @@ async def toggle_save_competition(comp_id: str = Body(..., embed=True), save: bo
 async def enter_competition(comp_id: str = Body(...), user_id: str = Query("default_user")):
     """Mark a competition as entered"""
     try:
-        user_file = USERS_DIR / f"{user_id}.json"
+        users_col = get_users_collection()
+        if users_col is None:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+             
+        existing_data = await users_col.find_one({"user_id": user_id}, {"_id": 0})
         
-        if user_file.exists():
-            with open(user_file, 'r') as f:
-                profile_data = json.load(f)
-            profile = UserProfile.from_dict(profile_data)
+        if existing_data:
+            profile = UserProfile.from_dict(existing_data)
         else:
             profile = UserProfile(user_id=user_id)
         
         profile.add_competition_entry(comp_id, status='registered')
         
-        with open(user_file, 'w') as f:
-            json.dump(profile.to_dict(), f, indent=2)
+        # Save updates
+        profile_dict = profile.to_dict()
+        await users_col.update_one(
+            {"user_id": user_id},
+            {"$set": profile_dict},
+            upsert=True
+        )
         
         return {"success": True, "message": "Competition entry recorded"}
         
@@ -326,19 +415,26 @@ async def enter_competition(comp_id: str = Body(...), user_id: str = Query("defa
 async def record_win(comp_id: str = Body(...), placement: int = Body(...), user_id: str = Query("default_user")):
     """Record a competition win"""
     try:
-        user_file = USERS_DIR / f"{user_id}.json"
+        users_col = get_users_collection()
+        if users_col is None:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+             
+        existing_data = await users_col.find_one({"user_id": user_id}, {"_id": 0})
         
-        if user_file.exists():
-            with open(user_file, 'r') as f:
-                profile_data = json.load(f)
-            profile = UserProfile.from_dict(profile_data)
+        if existing_data:
+            profile = UserProfile.from_dict(existing_data)
         else:
             profile = UserProfile(user_id=user_id)
         
         profile.add_competition_win(comp_id, placement)
         
-        with open(user_file, 'w') as f:
-            json.dump(profile.to_dict(), f, indent=2)
+        # Save updates
+        profile_dict = profile.to_dict()
+        await users_col.update_one(
+            {"user_id": user_id},
+            {"$set": profile_dict},
+            upsert=True
+        )
         
         return {"success": True, "message": "Win recorded successfully"}
         
@@ -351,16 +447,20 @@ async def record_win(comp_id: str = Body(...), placement: int = Body(...), user_
 async def get_recommendations(user_id: str = Query("default_user"), limit: int = Query(10, ge=1, le=50)):
     """Get personalized competition recommendations"""
     try:
+        users_col = get_users_collection()
+        if users_col is None:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+             
         # Load user profile
-        user_file = USERS_DIR / f"{user_id}.json"
-        if not user_file.exists():
+        existing_data = await users_col.find_one({"user_id": user_id}, {"_id": 0})
+        
+        if not existing_data:
             return {"success": False, "message": "Profile not found. Please complete your profile first."}
         
-        with open(user_file, 'r') as f:
-            profile_data = json.load(f)
+        profile_data = existing_data
         
         # Load all competitions
-        all_comps = load_all_competitions()
+        all_comps = await load_all_competitions()
         
         # Simple recommendation algorithm
         scored_comps = []
@@ -417,12 +517,16 @@ async def get_recommendations(user_id: str = Query("default_user"), limit: int =
 async def get_user_analytics(user_id: str = Query("default_user")):
     """Get user's competition analytics"""
     try:
-        user_file = USERS_DIR / f"{user_id}.json"
-        if not user_file.exists():
+        users_col = get_users_collection()
+        if users_col is None:
+             raise HTTPException(status_code=503, detail="Database unavailable")
+             
+        existing_data = await users_col.find_one({"user_id": user_id}, {"_id": 0})
+        
+        if not existing_data:
             return {"success": False, "message": "Profile not found"}
         
-        with open(user_file, 'r') as f:
-            profile_data = json.load(f)
+        profile_data = existing_data
         
         analytics = {
             "competitions_entered": len(profile_data.get('competitions_entered', [])),
@@ -448,12 +552,32 @@ async def refresh_competitions():
     """Manually trigger a refresh of all competitions"""
     try:
         results = {}
+        comps_col = get_competitions_collection()
+        
         for source, fetcher in FETCHERS.items():
             try:
                 print(f"Refreshing {source}...")
                 competitions = fetcher.run()
-                cache.save_competitions(competitions, source)
-                results[source] = {"success": True, "count": len(competitions)}
+                
+                # Bulk update logic
+                if comps_col is not None:
+                    count = 0
+                    for comp in competitions:
+                        comp_dict = comp.to_dict() if hasattr(comp, 'to_dict') else comp
+                        comp_id = comp_dict.get('id')
+                        if comp_id:
+                            await comps_col.update_one(
+                                {"id": comp_id},
+                                {"$set": comp_dict},
+                                upsert=True
+                            )
+                            count += 1
+                
+                    await update_source_metadata(source)
+                    results[source] = {"success": True, "count": count}
+                else:
+                    results[source] = {"success": False, "error": "Database disconnected"}
+                    
             except Exception as e:
                 results[source] = {"success": False, "error": str(e)}
         
@@ -467,10 +591,14 @@ async def refresh_competitions():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    db = get_database()
+    db_status = "connected" if db is not None else "disconnected"
+    
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "version": "2.0.0",
+        "database": db_status,
         "fetchers_count": len(FETCHERS),
         "fetchers": list(FETCHERS.keys())
     }
@@ -500,3 +628,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+

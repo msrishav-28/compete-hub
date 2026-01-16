@@ -105,18 +105,18 @@ export default function ExplorePage() {
           </p>
 
           {/* Quick Stats Bar */}
-          <div className="flex gap-8 mt-8 border-t border-white/10 pt-8 max-w-xl">
+          <div className="grid grid-cols-3 gap-4 mt-8 border-t border-white/10 pt-8 max-w-xl">
             <div>
-              <div className="text-3xl font-bold text-white">{filteredCompetitions.length}</div>
-              <div className="text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Active</div>
+              <div className="text-2xl md:text-3xl font-bold text-white">{filteredCompetitions.length}</div>
+              <div className="text-[10px] md:text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Active</div>
             </div>
             <div>
-              <div className="text-3xl font-bold text-white">{categories.length}</div>
-              <div className="text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Categories</div>
+              <div className="text-2xl md:text-3xl font-bold text-white">{categories.length}</div>
+              <div className="text-[10px] md:text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Categories</div>
             </div>
             <div>
-              <div className="text-3xl font-bold text-brand-lime">Live</div>
-              <div className="text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Status</div>
+              <div className="text-2xl md:text-3xl font-bold text-brand-lime">Live</div>
+              <div className="text-[10px] md:text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Status</div>
             </div>
           </div>
         </motion.div>

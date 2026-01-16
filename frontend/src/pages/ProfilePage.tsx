@@ -38,7 +38,7 @@ export default function ProfilePage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-12 flex items-center justify-between"
+          className="mb-12 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
         >
           <div>
             <h1 className="text-4xl md:text-5xl font-black mb-2 uppercase font-display tracking-tight">
@@ -46,7 +46,7 @@ export default function ProfilePage() {
             </h1>
             <p className="text-gray-400 text-lg">Manage your identity and preferences.</p>
           </div>
-          <Button variant="outline" className="border-white/10 hover:bg-white/5 text-white">
+          <Button variant="outline" className="border-white/10 hover:bg-white/5 text-white self-start sm:self-auto">
             <Cog6ToothIcon className="h-5 w-5 mr-2" />
             Settings
           </Button>
