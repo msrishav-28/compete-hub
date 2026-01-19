@@ -1,8 +1,55 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api`
   : 'http://localhost:8000/api';
+
+// API Error response type
+interface ApiErrorResponse {
+  detail?: string;
+  message?: string;
+}
+
+// Create axios instance with default config
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError<ApiErrorResponse>) => {
+    const message = error.response?.data?.detail || error.response?.data?.message || error.message || 'An error occurred';
+    console.error('API Error:', message);
+    return Promise.reject(new Error(message));
+  }
+);
+
+// Transform snake_case to camelCase for Competition objects
+const transformCompetition = (data: any): Competition => ({
+  id: data.id,
+  title: data.title,
+  description: data.description,
+  category: data.category,
+  platform: data.platform,
+  startDate: data.start_date,
+  endDate: data.end_date,
+  difficulty: data.difficulty,
+  timeCommitment: data.time_commitment,
+  prize: data.prize,
+  tags: data.tags || [],
+  teamSize: data.team_size,
+  link: data.link,
+  recruitmentPotential: data.recruitment_potential,
+  portfolioValue: data.portfolio_value,
+  company: data.company,
+  location: data.location,
+  skillsRequired: data.skills_required || [],
+});
 
 export interface Competition {
   id: string;
@@ -88,28 +135,30 @@ export const fetchCompetitions = async (params?: {
   limit?: number;
   offset?: number;
 }): Promise<Competition[]> => {
-  const response = await axios.get(`${API_BASE_URL}/competitions`, { params });
-  return response.data.data;
+  const response = await api.get('/competitions', { params });
+  const rawData = response.data.data || [];
+  return rawData.map(transformCompetition);
 };
 
 export const fetchCompetition = async (id: string): Promise<Competition> => {
-  const response = await axios.get(`${API_BASE_URL}/competitions/${id}`);
-  return response.data.data;
+  const response = await api.get(`/competitions/${id}`);
+  return transformCompetition(response.data.data);
 };
 
 export const fetchUpcomingWeek = async (): Promise<Competition[]> => {
-  const response = await axios.get(`${API_BASE_URL}/competitions/upcoming/week`);
-  return response.data.data;
+  const response = await api.get('/competitions/upcoming/week');
+  const rawData = response.data.data || [];
+  return rawData.map(transformCompetition);
 };
 
 export const fetchStats = async () => {
-  const response = await axios.get(`${API_BASE_URL}/stats/overview`);
+  const response = await api.get('/stats/overview');
   return response.data.data;
 };
 
 // User Profile APIs
 export const fetchUserProfile = async (userId: string = 'default_user'): Promise<UserProfile> => {
-  const response = await axios.get(`${API_BASE_URL}/users/profile`, {
+  const response = await api.get('/users/profile', {
     params: { user_id: userId }
   });
   return response.data.data;
@@ -119,8 +168,8 @@ export const updateUserProfile = async (
   profileData: Partial<UserProfile>,
   userId: string = 'default_user'
 ): Promise<UserProfile> => {
-  const response = await axios.post(
-    `${API_BASE_URL}/users/profile`,
+  const response = await api.post(
+    '/users/profile',
     profileData,
     { params: { user_id: userId } }
   );
@@ -128,17 +177,20 @@ export const updateUserProfile = async (
 };
 
 export const enterCompetition = async (compId: string, userId: string = 'default_user') => {
-  const response = await axios.post(
-    `${API_BASE_URL}/users/competition/enter`,
-    compId,
-    { params: { user_id: userId } }
+  const response = await api.post(
+    '/users/competition/enter',
+    JSON.stringify(compId),
+    { 
+      params: { user_id: userId },
+      headers: { 'Content-Type': 'application/json' }
+    }
   );
   return response.data;
 };
 
 export const recordWin = async (compId: string, placement: number, userId: string = 'default_user') => {
-  const response = await axios.post(
-    `${API_BASE_URL}/users/competition/win`,
+  const response = await api.post(
+    '/users/competition/win',
     { comp_id: compId, placement },
     { params: { user_id: userId } }
   );
@@ -146,8 +198,8 @@ export const recordWin = async (compId: string, placement: number, userId: strin
 };
 
 export const saveCompetitionForUser = async (compId: string, save: boolean, userId: string = 'default_user') => {
-  const response = await axios.post(
-    `${API_BASE_URL}/users/competition/save`,
+  const response = await api.post(
+    '/users/competition/save',
     { comp_id: compId, save },
     { params: { user_id: userId } }
   );
@@ -159,15 +211,19 @@ export const fetchRecommendations = async (
   userId: string = 'default_user',
   limit: number = 10
 ): Promise<Recommendation[]> => {
-  const response = await axios.get(`${API_BASE_URL}/recommendations`, {
+  const response = await api.get('/recommendations', {
     params: { user_id: userId, limit }
   });
-  return response.data.data;
+  const rawData = response.data.data || [];
+  return rawData.map((item: any) => ({
+    competition: transformCompetition(item.competition),
+    match_score: item.match_score,
+  }));
 };
 
 // Analytics API
 export const fetchUserAnalytics = async (userId: string = 'default_user'): Promise<AnalyticsData> => {
-  const response = await axios.get(`${API_BASE_URL}/analytics/user`, {
+  const response = await api.get('/analytics/user', {
     params: { user_id: userId }
   });
   return response.data.data;
@@ -175,6 +231,6 @@ export const fetchUserAnalytics = async (userId: string = 'default_user'): Promi
 
 // Refresh API
 export const refreshCompetitions = async () => {
-  const response = await axios.post(`${API_BASE_URL}/refresh`);
+  const response = await api.post('/refresh');
   return response.data;
 };

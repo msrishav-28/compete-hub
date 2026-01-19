@@ -40,10 +40,16 @@ ENV/
 
 # Environment variables
 .env
+.env.local
+.env.*.local
 
-# Local cache
-data/*.json
-!data/.gitkeep
+# Local cache and data
+data/
+backend/data/
+*.json
+!package.json
+!tsconfig.json
+!tsconfig.node.json
 
 # Logs
 *.log

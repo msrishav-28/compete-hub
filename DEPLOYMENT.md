@@ -4,10 +4,112 @@
 
 Deploy CompeteHub to production using:
 - **Frontend**: Vercel (recommended) or Netlify
-- **Backend**: Railway (recommended) or Render
+- **Backend**: Render (recommended)
+- **Database**: MongoDB Atlas (FREE tier available)
 
 **Estimated time**: 30 minutes  
-**Cost**: $5-10/month (or FREE with Render free tier)
+**Cost**: FREE (using Render free tier + MongoDB Atlas free tier)
+
+---
+
+## Quick Start: Render + MongoDB Atlas
+
+### Step 1: Set Up MongoDB Atlas (FREE)
+
+1. Go to [mongodb.com/atlas](https://www.mongodb.com/atlas) and sign up
+2. Create a **FREE** cluster (M0 Sandbox)
+3. **Set up Database Access:**
+   - Go to Security → Database Access
+   - Add a new database user with username/password
+   - Note down the credentials
+4. **Set up Network Access:**
+   - Go to Security → Network Access
+   - Click "Add IP Address"
+   - Click "Allow Access from Anywhere" (0.0.0.0/0) for Render compatibility
+5. **Get Connection String:**
+   - Go to Deployment → Database → Connect
+   - Choose "Connect your application"
+   - Copy the connection string, it looks like:
+     ```
+     mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+     ```
+   - Replace `<username>` and `<password>` with your database user credentials
+
+### Step 2: Deploy Backend to Render
+
+1. Go to [render.com](https://render.com) and sign up with GitHub
+2. Click **"New +"** → **"Web Service"**
+3. Connect your GitHub repository
+4. Configure the service:
+
+   | Setting | Value |
+   |---------|-------|
+   | **Name** | `competehub-api` |
+   | **Region** | Oregon (US West) or closest to you |
+   | **Branch** | `main` |
+   | **Root Directory** | `backend` |
+   | **Runtime** | Python 3 |
+   | **Build Command** | `pip install -r requirements.txt` |
+   | **Start Command** | `gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120` |
+   | **Instance Type** | Free |
+
+5. Add **Environment Variables** (click "Advanced" → "Add Environment Variable"):
+
+   | Key | Value |
+   |-----|-------|
+   | `MONGODB_URL` | Your MongoDB Atlas connection string |
+   | `DB_NAME` | `competehub` |
+   | `ENVIRONMENT` | `production` |
+   | `CORS_ORIGINS` | `https://your-frontend.vercel.app` (update after frontend deploy) |
+
+6. Click **"Create Web Service"**
+7. Wait for deployment (3-5 minutes)
+8. Copy your Render URL: `https://competehub-api.onrender.com`
+9. Test: Visit `https://competehub-api.onrender.com/health`
+
+### Step 3: Deploy Frontend to Vercel
+
+1. Go to [vercel.com](https://vercel.com) and sign up with GitHub
+2. Click **"New Project"** → Import your repository
+3. Configure:
+
+   | Setting | Value |
+   |---------|-------|
+   | **Framework Preset** | Vite |
+   | **Root Directory** | `frontend` |
+   | **Build Command** | `npm run build` |
+   | **Output Directory** | `dist` |
+
+4. Add **Environment Variable**:
+
+   | Key | Value |
+   |-----|-------|
+   | `VITE_API_URL` | `https://competehub-api.onrender.com` |
+
+5. Click **"Deploy"**
+6. Copy your Vercel URL: `https://competehub.vercel.app`
+
+### Step 4: Update CORS (Important!)
+
+1. Go back to Render dashboard
+2. Navigate to your `competehub-api` service → Environment
+3. Update `CORS_ORIGINS`:
+   ```
+   https://competehub.vercel.app,https://your-custom-domain.com
+   ```
+4. Click "Save Changes" - Render will auto-redeploy
+
+---
+
+## Verification Checklist
+
+After deployment, verify everything works:
+
+- [ ] Backend health: `https://your-backend.onrender.com/health` → Should show `"status": "healthy"`
+- [ ] API docs: `https://your-backend.onrender.com/docs` → Should load Swagger UI
+- [ ] Frontend loads: `https://your-frontend.vercel.app` → Should show landing page
+- [ ] Competitions load: Navigate to Explore page → Should fetch competitions
+- [ ] Database connected: Health endpoint shows `"database": {"connected": true}`
 
 ---
 
@@ -24,80 +126,73 @@ cd frontend
 npm install
 ```
 
+### Set Up Local Environment
+```bash
+# Backend - create backend/.env
+cp backend/.env.example backend/.env
+# Edit backend/.env with your MongoDB Atlas URL
+
+# Frontend - create frontend/.env
+cp frontend/.env.example frontend/.env
+```
+
 ### Run Locally
 ```bash
 # Option 1: Use startup script (Windows)
 start.bat
 
 # Option 2: Manual (two terminals)
-# Terminal 1
-cd backend && python main.py
+# Terminal 1 - Backend
+cd backend && python -m uvicorn main:app --reload --port 8000
 
-# Terminal 2
+# Terminal 2 - Frontend
 cd frontend && npm run dev
 ```
 
-Access at:
+Access locally:
 - Frontend: http://localhost:3000
 - Backend: http://localhost:8000
 - API Docs: http://localhost:8000/docs
 
 ---
 
-## Production Deployment
+## Troubleshooting
 
-### Step 1: Deploy Backend
+### Backend won't start on Render
+- Check Render logs for errors
+- Verify `MONGODB_URL` is set correctly (no `<password>` placeholder)
+- Ensure MongoDB Atlas IP whitelist includes `0.0.0.0/0`
 
-#### Option A: Railway (Recommended)
+### Database connection fails
+- Verify MongoDB Atlas user has correct permissions
+- Check if password contains special characters (URL-encode them)
+- Test connection string locally first
 
-1. Go to [railway.app](https://railway.app)
-2. Sign in with GitHub
-3. Click "New Project" → "Deploy from GitHub repo"
-4. Select your repository
-5. Configure:
-   - Root Directory: `backend`
-   - Environment Variables:
-     ```
-     CORS_ORIGINS=https://your-frontend.vercel.app,http://localhost:3000
-     PORT=8000
-     CACHE_TTL_HOURS=24
-     ```
-6. Deploy and copy your Railway URL (e.g., `https://competehub.railway.app`)
+### CORS errors on frontend
+- Verify `CORS_ORIGINS` includes your frontend URL (exact match, with https://)
+- Check for trailing slashes - don't include them
+- Redeploy backend after updating CORS
 
-#### Option B: Render
+### Render free tier sleeps
+- Free tier services sleep after 15 minutes of inactivity
+- First request after sleep takes ~30 seconds
+- Consider upgrading to paid tier for production
 
-1. Go to [render.com](https://render.com)
-2. Sign in with GitHub
-3. Create new "Web Service"
-4. Configure:
-   - Root Directory: `backend`
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - Environment Variables: (same as Railway above)
-5. Deploy and copy your Render URL
+---
 
-### Step 2: Deploy Frontend
+## Production Checklist
 
-#### Vercel (Recommended)
+Before going live:
 
-1. Go to [vercel.com](https://vercel.com)
-2. Sign in with GitHub
-3. Click "New Project" → Import your repository
-4. Configure:
-   - Framework Preset: Vite
-   - Root Directory: `frontend`
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
-   - Environment Variables:
-     ```
-     VITE_API_URL=https://your-backend.railway.app
-     ```
-5. Deploy and copy your Vercel URL
-
-#### Netlify (Alternative)
-
-1. Go to [netlify.com](https://netlify.com)
-2. Import repository
+- [ ] MongoDB Atlas: IP whitelist configured
+- [ ] MongoDB Atlas: Database user created with strong password
+- [ ] Render: All environment variables set
+- [ ] Render: Health check passing
+- [ ] Vercel: `VITE_API_URL` pointing to Render backend
+- [ ] CORS: Frontend URL added to `CORS_ORIGINS`
+- [ ] Test: All API endpoints working
+- [ ] Test: User can save competitions
+- [ ] Test: Competitions load on Explore page
 3. Configure:
    - Base directory: `frontend`
    - Build command: `npm run build`
