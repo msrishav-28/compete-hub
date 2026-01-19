@@ -2,48 +2,53 @@
 
 All notable changes to CompeteHub are documented in this file.
 
-## [2.0.0] - 2024
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+---
+
+## [2.0.0] - 2024-11-09
 
 ### Added
-- Complete React frontend with TypeScript
-- Professional Heroicons icon pack (replaced emojis)
-- FastAPI backend with 15 REST endpoints
-- User profile management system
-- Smart recommendation engine
-- Analytics dashboard with charts
-- Calendar view for competitions
-- Dark mode with theme persistence
-- State management with Zustand
-- Data visualization with Recharts
-- Advanced filtering and search
-- Save/bookmark functionality
-- Responsive design for all devices
-- Interactive API documentation (Swagger)
 
-### Changed
-- Migrated from Lucide React to Heroicons
-- Streamlined documentation (removed redundant files)
-- Professional README without emojis
-- Clean project structure
+- FastAPI backend with async MongoDB (Motor driver)
+- React 18 frontend with TypeScript
+- Pydantic settings for configuration management
+- Clean architecture with repositories and services layers
+- User profile system with skill tracking
+- Competition save/bookmark functionality
+- Entry and win recording
+- Personalized recommendation engine
+- Analytics dashboard with Recharts
+- Calendar view for upcoming competitions
+- Full-text search on competitions
+- Zustand state management with persistence
+- TanStack Query for data fetching
+- Framer Motion animations
+- Heroicons icon set
+- Dark mode (default)
+- Docker Compose for local development
+- Render deployment configuration
+- Vercel deployment configuration
 
-### Technical Improvements
-- Type-safe TypeScript throughout
-- Comprehensive error handling
-- Optimized caching (24-hour TTL)
-- Modern UI with Tailwind CSS
-- Smooth animations with Framer Motion
-- Performance optimizations
+### Technical Stack
 
-### Removed
-- Redundant documentation files
-- Emoji-based documentation
-- Lucide React dependency
-- Conflicting/unused files
+- Backend: FastAPI, Motor (async MongoDB), Pydantic, Uvicorn/Gunicorn
+- Frontend: React, TypeScript, Vite, Tailwind CSS, Axios
+- Database: MongoDB Atlas
+- State: Zustand with localStorage persistence
+- Data fetching: TanStack Query with caching
 
-## [1.0.0] - Initial Release
+---
 
-### Features
-- Basic Streamlit interface
-- 4 competition sources (Codeforces, Kaggle, HackerRank, Hackalist)
-- Simple filtering
-- JSON caching system
+## [1.0.0] - 2024-10-01
+
+### Added
+
+- Initial release with Streamlit interface
+- Four competition sources:
+  - Codeforces API
+  - Kaggle API
+  - HackerRank web scraper
+  - Hackalist web scraper
+- Basic category filtering
+- JSON file caching
