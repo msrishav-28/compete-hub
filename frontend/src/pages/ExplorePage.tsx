@@ -1,20 +1,47 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MagnifyingGlassIcon, AdjustmentsHorizontalIcon, Squares2X2Icon, ListBulletIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, AdjustmentsHorizontalIcon, Squares2X2Icon, ListBulletIcon, FireIcon, TrophyIcon, BoltIcon, CodeBracketIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import CompetitionCard from '../components/CompetitionCard';
-import { fetchCompetitions } from '../api/competitions';
+import CompetitionDrawer from '../components/CompetitionDrawer';
+import { fetchCompetitions, Competition } from '../api/competitions';
 import { useCompetitionStore } from '../store/useCompetitionStore';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import HolographicChip from '../components/ui/HolographicChip';
+import TextScramble from '../components/ui/TextScramble';
 import { CompetitionCardSkeleton } from '../components/ui/Skeleton';
-import { cn } from '../utils';
+import { cn, getDaysUntil } from '../utils';
+
+// Quick filter presets for holographic chips
+const quickFilters = [
+  { id: 'placement', label: 'Placement Leagues', icon: TrophyIcon, filter: { recruitmentPotential: true }, variant: 'trophy' as const },
+  { id: 'ending', label: 'Ending Soon', icon: FireIcon, filter: { endingSoon: true }, variant: 'fire' as const },
+  { id: 'beginner', label: 'Beginner Friendly', icon: BoltIcon, filter: { difficulty: 'beginner' }, variant: 'default' as const },
+  { id: 'ai', label: 'AI / ML', icon: CpuChipIcon, filter: { category: 'data_science' }, variant: 'code' as const },
+  { id: 'coding', label: 'Competitive Coding', icon: CodeBracketIcon, filter: { category: 'coding_contests' }, variant: 'code' as const },
+];
 
 export default function ExplorePage() {
   const { data: competitions, isLoading, error } = useQuery(['competitions'], () => fetchCompetitions());
   const { filters, setFilters, resetFilters, viewMode, setViewMode } = useCompetitionStore();
   const [showFilters, setShowFilters] = useState(false);
+  const [activeQuickFilter, setActiveQuickFilter] = useState<string | null>(null);
+  
+  // Mobile drawer state
+  const [selectedCompetition, setSelectedCompetition] = useState<Competition | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  
+  // Detect mobile
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  const handleCardClick = (comp: Competition) => {
+    if (isMobile) {
+      setSelectedCompetition(comp);
+      setDrawerOpen(true);
+    }
+  };
 
   // Filter competitions (Memoized)
   const filteredCompetitions = useMemo(() => {
@@ -46,10 +73,36 @@ export default function ExplorePage() {
       if (filters.timeCommitment.length > 0 && !filters.timeCommitment.includes(comp.timeCommitment)) {
         return false;
       }
+      
+      // Quick filter: ending soon (< 7 days)
+      if (activeQuickFilter === 'ending') {
+        const daysLeft = getDaysUntil(comp.startDate);
+        if (daysLeft > 7 || daysLeft < 0) return false;
+      }
+      
+      // Quick filter: placement leagues (recruitment potential)
+      if (activeQuickFilter === 'placement' && !comp.recruitmentPotential) {
+        return false;
+      }
+      
+      // Quick filter: beginner
+      if (activeQuickFilter === 'beginner' && comp.difficulty !== 'beginner') {
+        return false;
+      }
+      
+      // Quick filter: AI/ML
+      if (activeQuickFilter === 'ai' && comp.category !== 'data_science') {
+        return false;
+      }
+      
+      // Quick filter: coding
+      if (activeQuickFilter === 'coding' && comp.category !== 'coding_contests') {
+        return false;
+      }
 
       return true;
     });
-  }, [competitions, filters]);
+  }, [competitions, filters, activeQuickFilter]);
 
   // Unique Filter Values
   const categories = useMemo(() => Array.from(new Set(competitions?.map(c => c.category) || [])), [competitions]);
@@ -64,7 +117,7 @@ export default function ExplorePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen pt-24 pb-20 bg-black text-white relative overflow-hidden">
+      <div className="min-h-screen pt-24 pb-20 relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -78,7 +131,7 @@ export default function ExplorePage() {
 
   if (error) {
     return (
-      <div className="flex flex-col justify-center items-center h-[60vh] text-red-500">
+      <div className="flex flex-col justify-center items-center h-[60vh] text-signal-red">
         <p className="text-lg font-bold mb-2">System Error</p>
         <p className="text-sm opacity-80">Failed to load competition protocols.</p>
       </div>
@@ -86,21 +139,24 @@ export default function ExplorePage() {
   }
 
   return (
-    <div className="min-h-screen pt-24 pb-20 bg-black text-white relative overflow-hidden">
+    <div className="min-h-screen pt-24 pb-20 relative overflow-hidden">
       {/* Ambient Gradient Background */}
-      <div className="absolute top-0 left-0 right-0 h-[500px] bg-gradient-to-b from-brand-lime/5 via-transparent to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 right-0 h-[500px] bg-gradient-to-b from-neon-limit/5 via-transparent to-transparent pointer-events-none" />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         {/* Header Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-16"
+          className="mb-12"
         >
-          <h1 className="text-5xl md:text-7xl font-black mb-6 tracking-tighter uppercase font-display">
-            Explore <span className="text-brand-lime">Challenges</span>
+          <h1 className="text-5xl md:text-7xl font-black mb-4 tracking-tighter uppercase font-display">
+            <TextScramble text="EXPLORE" className="text-white" duration={800} />
+            <span className="text-neon-limit ml-3">
+              <TextScramble text="CHALLENGES" className="text-neon-limit" duration={800} delay={200} />
+            </span>
           </h1>
-          <p className="text-xl text-gray-400 max-w-2xl font-light leading-relaxed">
+          <p className="text-lg text-gray-400 max-w-2xl leading-relaxed">
             Access a curated database of {competitions?.length || 0}+ hackathons and engineering competitions. Filter by difficulty, platform, and rewards.
           </p>
 
@@ -115,14 +171,34 @@ export default function ExplorePage() {
               <div className="text-[10px] md:text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Categories</div>
             </div>
             <div>
-              <div className="text-2xl md:text-3xl font-bold text-brand-lime">Live</div>
+              <div className="text-2xl md:text-3xl font-bold text-neon-limit">Live</div>
               <div className="text-[10px] md:text-xs uppercase tracking-widest text-gray-400 font-semibold mt-1">Status</div>
             </div>
           </div>
         </motion.div>
 
+        {/* Holographic Quick Filter Chips - Horizontal Scroll */}
+        <div className="mb-6 -mx-4 px-4 overflow-x-auto scrollbar-hide">
+          <div className="flex gap-3 pb-2 min-w-max">
+            {quickFilters.map((qf) => {
+              const Icon = qf.icon;
+              return (
+                <HolographicChip
+                  key={qf.id}
+                  icon={<Icon className="w-4 h-4" />}
+                  active={activeQuickFilter === qf.id}
+                  onClick={() => setActiveQuickFilter(activeQuickFilter === qf.id ? null : qf.id)}
+                  variant={qf.variant}
+                >
+                  {qf.label}
+                </HolographicChip>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Search & Toolbar */}
-        <div className="flex flex-col md:flex-row gap-4 mb-8 sticky top-24 z-30 bg-black/80 backdrop-blur-xl p-4 -mx-4 md:mx-0 rounded-2xl border border-white/5 shadow-2xl">
+        <div className="flex flex-col md:flex-row gap-4 mb-8 sticky top-24 z-30 bg-neon-black/80 backdrop-blur-xl p-4 -mx-4 md:mx-0 rounded-2xl border border-white/5 shadow-2xl">
           <div className="flex-1 relative">
             <MagnifyingGlassIcon className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
             <Input
@@ -130,12 +206,12 @@ export default function ExplorePage() {
               placeholder="Search by keywords..."
               value={filters.search}
               onChange={(e) => setFilters({ search: e.target.value })}
-              className="pl-12 bg-white/5 border-transparent focus:bg-white/10 h-12"
+              className="pl-12 bg-white/5 border-transparent focus:bg-white/10 h-12 rounded-lg"
             />
           </div>
           <div className="flex gap-2">
             <Button
-              variant={showFilters ? 'primary' : 'outline'}
+              variant={showFilters ? 'lime' : 'secondary'}
               onClick={() => setShowFilters(!showFilters)}
               className="h-12 px-6"
             >
@@ -183,8 +259,8 @@ export default function ExplorePage() {
                       {categories.map((cat) => (
                         <Badge
                           key={cat}
-                          variant={filters.category.includes(cat) ? 'success' : 'default'}
-                          className="cursor-pointer hover:border-brand-lime/30 transition-colors py-2 px-3"
+                          variant={filters.category.includes(cat) ? 'lime' : 'default'}
+                          className="cursor-pointer hover:border-neon-limit/30 transition-colors py-2 px-3"
                           onClick={() => toggleFilter('category', cat)}
                         >
                           {cat.replace('_', ' ')}
@@ -200,7 +276,7 @@ export default function ExplorePage() {
                         <Badge
                           key={diff}
                           variant={filters.difficulty.includes(diff) ? 'warning' : 'default'}
-                          className="cursor-pointer hover:border-brand-lime/30 transition-colors py-2 px-3"
+                          className="cursor-pointer hover:border-signal-amber/30 transition-colors py-2 px-3"
                           onClick={() => toggleFilter('difficulty', diff)}
                         >
                           {diff}
@@ -216,7 +292,7 @@ export default function ExplorePage() {
                         <Badge
                           key={time}
                           variant={filters.timeCommitment.includes(time) ? 'info' : 'default'}
-                          className="cursor-pointer hover:border-brand-lime/30 transition-colors py-2 px-3"
+                          className="cursor-pointer hover:border-blue-500/30 transition-colors py-2 px-3"
                           onClick={() => toggleFilter('timeCommitment', time)}
                         >
                           {time}
@@ -256,7 +332,10 @@ export default function ExplorePage() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ delay: index * 0.05, duration: 0.3 }}
               >
-                <CompetitionCard {...comp} />
+                <CompetitionCard 
+                  {...comp} 
+                  onClick={() => handleCardClick(comp)}
+                />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -277,12 +356,19 @@ export default function ExplorePage() {
             <p className="text-gray-400 max-w-sm mx-auto mb-8">
               We couldn't find any competitions matching your current filters.
             </p>
-            <Button variant="outline" onClick={resetFilters}>
+            <Button variant="outline" onClick={() => { resetFilters(); setActiveQuickFilter(null); }}>
               Clear Filters
             </Button>
           </motion.div>
         )}
       </div>
+      
+      {/* Mobile Competition Drawer */}
+      <CompetitionDrawer
+        competition={selectedCompetition}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+      />
     </div>
   );
 }

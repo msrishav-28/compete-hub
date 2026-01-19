@@ -1,17 +1,27 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { BookmarkSlashIcon } from '@heroicons/react/24/outline';
-import { fetchCompetitions } from '../api/competitions';
+import { SparklesIcon } from '@heroicons/react/24/outline';
+import { fetchCompetitions, Competition } from '../api/competitions';
 import { useCompetitionStore } from '../store/useCompetitionStore';
 import CompetitionCard from '../components/CompetitionCard';
-import Button from '../components/ui/Button';
+import CompetitionDrawer from '../components/CompetitionDrawer';
+import MagneticButton from '../components/ui/MagneticButton';
+import TextScramble from '../components/ui/TextScramble';
 import { Link } from 'react-router-dom';
 
 export default function SavedPage() {
   const { data: competitions } = useQuery(['competitions'], () => fetchCompetitions());
   const { savedCompetitions } = useCompetitionStore();
+  const [selectedCompetition, setSelectedCompetition] = useState<Competition | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const saved = competitions?.filter((comp) => savedCompetitions.includes(comp.id)) || [];
+
+  const handleCardClick = (comp: Competition) => {
+    setSelectedCompetition(comp);
+    setDrawerOpen(true);
+  };
 
   return (
     <div className="min-h-screen pt-24 pb-20 bg-black text-white relative overflow-hidden">
@@ -26,9 +36,12 @@ export default function SavedPage() {
         >
           <div className="flex items-center gap-3 mb-4">
             <h1 className="text-4xl md:text-5xl font-black font-display uppercase tracking-tight">
-              Saved <span className="text-brand-lime">Challenges</span>
+              <TextScramble text="SAVED" className="text-white" duration={600} />
+              <span className="text-brand-lime ml-2">
+                <TextScramble text="CHALLENGES" className="text-brand-lime" duration={600} delay={150} />
+              </span>
             </h1>
-            <div className="px-4 py-1 rounded-full bg-white/10 border border-white/10 text-white font-bold text-lg">
+            <div className="px-4 py-1 rounded-full bg-white/10 border border-white/10 text-white font-bold text-lg font-mono">
               {saved.length}
             </div>
           </div>
@@ -49,7 +62,7 @@ export default function SavedPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
               >
-                <CompetitionCard {...comp} />
+                <CompetitionCard {...comp} onClick={() => handleCardClick(comp)} />
               </motion.div>
             ))}
           </motion.div>
@@ -58,9 +71,10 @@ export default function SavedPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="text-center py-32 rounded-3xl border border-dashed border-white/10 bg-white/5"
+            style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}
           >
             <div className="inline-flex h-20 w-20 items-center justify-center rounded-full bg-white/5 mb-6">
-              <BookmarkSlashIcon className="h-10 w-10 text-gray-500" />
+              <SparklesIcon className="h-10 w-10 text-gray-500" />
             </div>
             <h3 className="text-3xl font-bold text-white mb-4 font-display uppercase tracking-wide">
               No saved items
@@ -69,13 +83,20 @@ export default function SavedPage() {
               You haven't bookmarked any competitions yet. Browse the explore page to find upcoming events.
             </p>
             <Link to="/explore">
-              <Button className="bg-brand-lime text-black hover:bg-brand-lime/90 font-bold px-8 py-3">
+              <MagneticButton variant="primary" className="px-8 py-3">
                 Explore Competitions
-              </Button>
+              </MagneticButton>
             </Link>
           </motion.div>
         )}
       </div>
+
+      {/* Mobile Competition Drawer */}
+      <CompetitionDrawer
+        competition={selectedCompetition}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+      />
     </div>
   );
 }

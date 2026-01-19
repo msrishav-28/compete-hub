@@ -12,12 +12,12 @@ interface ButtonProps extends HTMLMotionProps<"button"> {
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = 'primary', size = 'md', isLoading, children, disabled, ...props }, ref) => {
     const variants = {
-      primary: 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg',
-      secondary: 'bg-gray-600 text-white hover:bg-gray-700 shadow-md hover:shadow-lg',
-      outline: 'border-2 border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950',
-      ghost: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800',
-      danger: 'bg-red-600 text-white hover:bg-red-700 shadow-md hover:shadow-lg',
-      lime: 'bg-brand-lime text-black hover:bg-brand-lime/90 shadow-[0_0_20px_rgba(163,230,53,0.3)] hover:shadow-[0_0_30px_rgba(163,230,53,0.5)] font-bold',
+      primary: 'bg-neon-limit text-black hover:bg-neon-limit/90 shadow-[0_0_15px_rgba(163,230,53,0.3)] hover:shadow-[0_0_25px_rgba(163,230,53,0.5)] font-bold tracking-tight',
+      secondary: 'bg-white/5 border border-white/10 text-white hover:bg-white/10 hover:border-white/20 backdrop-blur-md',
+      outline: 'border border-neon-limit text-neon-limit hover:bg-neon-limit/10',
+      ghost: 'text-gray-400 hover:text-white hover:bg-white/5',
+      danger: 'bg-signal-red text-white hover:bg-red-600 shadow-md',
+      lime: 'bg-neon-limit text-black hover:bg-neon-limit/90 shadow-[0_0_20px_rgba(163,230,53,0.3)] hover:shadow-[0_0_30px_rgba(163,230,53,0.5)] font-bold',
     };
 
     const sizes = {

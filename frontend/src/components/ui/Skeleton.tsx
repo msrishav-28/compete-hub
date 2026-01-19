@@ -5,7 +5,7 @@ interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> { }
 export function Skeleton({ className, ...props }: SkeletonProps) {
     return (
         <div
-            className={cn("animate-pulse rounded-md bg-white/5", className)}
+            className={cn("animate-pulse rounded bg-white/5", className)}
             {...props}
         />
     );
@@ -13,7 +13,7 @@ export function Skeleton({ className, ...props }: SkeletonProps) {
 
 export function CompetitionCardSkeleton() {
     return (
-        <div className="rounded-3xl border border-white/5 bg-black/40 p-8 h-full">
+        <div className="rounded-xl border border-white/5 bg-white/5 p-8 h-full backdrop-blur-xl">
             <div className="flex justify-between items-start mb-6">
                 <div className="space-y-2 w-full">
                     <Skeleton className="h-8 w-3/4" />

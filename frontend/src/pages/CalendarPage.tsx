@@ -4,8 +4,9 @@ import { motion } from 'framer-motion';
 import { ChevronLeftIcon, ChevronRightIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import { fetchCompetitions } from '../api/competitions';
 import Card, { CardContent } from '../components/ui/Card';
-import Button from '../components/ui/Button';
+import MagneticButton from '../components/ui/MagneticButton';
 import Badge from '../components/ui/Badge';
+import TextScramble from '../components/ui/TextScramble';
 import { Link } from 'react-router-dom';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from 'date-fns';
 
@@ -46,7 +47,10 @@ export default function CalendarPage() {
           className="mb-12"
         >
           <h1 className="text-4xl md:text-5xl font-black mb-4 uppercase font-display tracking-tight">
-            Competition <span className="text-brand-lime">Calendar</span>
+            <TextScramble text="COMPETITION" className="text-white" duration={600} />
+            <span className="text-brand-lime ml-2">
+              <TextScramble text="CALENDAR" className="text-brand-lime" duration={600} delay={150} />
+            </span>
           </h1>
           <p className="text-gray-400 text-lg">Plan your schedule around upcoming events.</p>
         </motion.div>
@@ -62,30 +66,30 @@ export default function CalendarPage() {
                     {format(currentMonth, 'MMMM yyyy')}
                   </h2>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
+                    <MagneticButton
+                      variant="secondary"
                       size="sm"
                       onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
                       className="border-white/10 hover:bg-white/5 text-white"
                     >
                       <ChevronLeftIcon className="h-5 w-5" />
-                    </Button>
-                    <Button
-                      variant="outline"
+                    </MagneticButton>
+                    <MagneticButton
+                      variant="secondary"
                       size="sm"
                       onClick={() => setCurrentMonth(new Date())}
                       className="border-white/10 hover:bg-white/5 text-white"
                     >
                       Today
-                    </Button>
-                    <Button
-                      variant="outline"
+                    </MagneticButton>
+                    <MagneticButton
+                      variant="secondary"
                       size="sm"
                       onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
                       className="border-white/10 hover:bg-white/5 text-white"
                     >
                       <ChevronRightIcon className="h-5 w-5" />
-                    </Button>
+                    </MagneticButton>
                   </div>
                 </div>
               </div>
@@ -119,7 +123,7 @@ export default function CalendarPage() {
                           aspect-square relative rounded-xl text-sm font-medium transition-all flex items-center justify-center
                           ${!isSameMonth(day, currentMonth) ? 'text-gray-700 opacity-50' : 'text-gray-300'}
                           ${isToday ? 'bg-brand-lime text-black font-bold shadow-[0_0_20px_rgba(163,230,53,0.3)]' : ''}
-                          ${isSelected && !isToday ? 'bg-white/20 text-white ring-2 ring-white/30' : ''}
+                          ${isSelected && !isToday ? 'bg-brand-lime text-black font-bold ring-2 ring-brand-lime/50' : ''}
                           ${!hasComps && !isToday && !isSelected ? 'hover:bg-white/5' : ''}
                           ${hasComps && !isToday && !isSelected ? 'bg-white/10 hover:bg-white/20' : ''}
                         `}
@@ -130,7 +134,7 @@ export default function CalendarPage() {
                             {competitionsByDate[dateKey].slice(0, 3).map((_, i) => (
                               <div
                                 key={i}
-                                className={`h-1 w-1 rounded-full ${isToday ? 'bg-black' : 'bg-brand-lime'}`}
+                                className={`h-1 w-1 rounded-full ${isToday || isSelected ? 'bg-black' : 'bg-brand-lime'}`}
                               />
                             ))}
                           </div>

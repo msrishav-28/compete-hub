@@ -14,14 +14,16 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
         ref={ref}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        whileHover={hover ? { y: -4, shadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' } : {}}
+        whileHover={hover ? { y: -4, boxShadow: '0 0 20px rgba(163, 230, 53, 0.1)' } : {}}
         className={cn(
-          'rounded-xl border transition-all duration-300',
+          'rounded-xl border transition-all duration-300 relative overflow-hidden',
           glass
-            ? 'bg-white/70 dark:bg-white/5 backdrop-blur-xl border-white/10 text-white'
-            : 'bg-white dark:bg-black border-gray-200 dark:border-white/10',
-          hover && 'hover:shadow-xl cursor-pointer',
-          'shadow-md',
+            ? 'glass-panel text-white' // Assuming glass-panel utility or manual classes
+            : 'bg-neon-black border-white/10 text-white',
+          // Explicit Dataglass overrides if 'glass' is true, or default to nice dark mode
+          'backdrop-blur-xl bg-white/5 border-white/10',
+          hover && 'hover:border-neon-limit/50 cursor-pointer',
+          'shadow-2xl shadow-black/50',
           className
         )}
         {...props}

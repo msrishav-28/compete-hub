@@ -1,30 +1,48 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
     ArrowRightIcon,
     UserGroupIcon,
     ChartBarIcon,
-    DocumentDuplicateIcon
+    DocumentDuplicateIcon,
+    RocketLaunchIcon,
 } from '@heroicons/react/24/outline';
+import TextScramble from '../components/ui/TextScramble';
+import MagneticButton from '../components/ui/MagneticButton';
+import OnboardingWizard from '../components/OnboardingWizard';
 
 export default function LandingPage() {
     const navigate = useNavigate();
+    const [showOnboarding, setShowOnboarding] = useState(false);
+
+    const handleOnboardingComplete = (data: any) => {
+        // Store onboarding data in localStorage or state management
+        localStorage.setItem('onboardingData', JSON.stringify(data));
+        localStorage.setItem('onboardingComplete', 'true');
+        setShowOnboarding(false);
+        navigate('/explore');
+    };
+
+    const handleStartCompeting = () => {
+        const hasOnboarded = localStorage.getItem('onboardingComplete');
+        if (hasOnboarded) {
+            navigate('/explore');
+        } else {
+            setShowOnboarding(true);
+        }
+    };
 
     return (
-        <div className="relative min-h-screen bg-white dark:bg-black overflow-hidden selection:bg-lime-400 selection:text-black font-sans">
-            {/* Background Video Blob */}
+        <div className="relative min-h-screen overflow-hidden font-sans text-white">
+            {/* Background */}
             <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-                <video
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full object-cover opacity-80 dark:opacity-60 blur-sm scale-110"
-                >
-                    <source src="/hero-blob.mp4" type="video/mp4" />
-                </video>
-                {/* Overlay Overlay */}
-                <div className="absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-white/90 dark:from-black/30 dark:via-transparent dark:to-black/90" />
+                <div className="absolute inset-0 bg-neon-black" />
+                <div className="absolute inset-0 bg-gradient-to-b from-neon-black/30 via-neon-black/10 to-neon-black/90 mix-blend-multiply" />
+                <div className="absolute inset-0 bg-grid-pattern opacity-10" />
+                {/* Ambient Glow */}
+                <div className="absolute top-1/4 -right-20 w-96 h-96 bg-neon-limit/10 rounded-full blur-3xl" />
+                <div className="absolute bottom-1/4 -left-20 w-64 h-64 bg-neon-limit/5 rounded-full blur-3xl" />
             </div>
 
             <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-16">
@@ -36,13 +54,14 @@ export default function LandingPage() {
                         transition={{ duration: 0.8, ease: "easeOut" }}
                         className="mb-8"
                     >
-                        <h1 className="text-5xl sm:text-7xl md:text-9xl font-black tracking-tighter text-black dark:text-white mb-2 leading-none uppercase">
-                            Compete
-                            <br />
-                            Hub.
+                        <h1 className="text-5xl sm:text-7xl md:text-9xl font-black tracking-tighter text-white mb-2 leading-none uppercase drop-shadow-2xl">
+                            <TextScramble text="COMPETE" className="block" duration={1000} />
+                            <span className="text-transparent bg-clip-text bg-gradient-to-r from-white via-gray-200 to-gray-400">
+                                <TextScramble text="HUB." duration={1000} delay={300} />
+                            </span>
                         </h1>
-                        <p className="text-lg md:text-2xl font-medium text-gray-700 dark:text-gray-300 max-w-2xl mx-auto mt-6 tracking-wide px-4">
-                            The ultimate launchpad for <span className="bg-lime-400 text-black px-2 py-1 rounded-sm whitespace-nowrap">Engineering Students.</span> Discover, track, and win the world's best hackathons.
+                        <p className="text-lg md:text-2xl font-medium text-gray-300 max-w-2xl mx-auto mt-6 tracking-wide px-4 font-display">
+                            The ultimate launchpad for <span className="bg-neon-limit text-black px-2 py-0.5 rounded-sm whitespace-nowrap font-bold">Engineering Students.</span> Discover, track, and win.
                         </p>
                     </motion.div>
 
@@ -53,16 +72,23 @@ export default function LandingPage() {
                         transition={{ delay: 0.3, duration: 0.5 }}
                         className="flex flex-col sm:flex-row gap-4 mt-8"
                     >
-                        <button
-                            onClick={() => navigate('/explore')}
-                            className="px-8 py-4 bg-black dark:bg-white text-white dark:text-black font-bold text-lg rounded-full hover:scale-105 transition-transform flex items-center gap-2 group"
+                        <MagneticButton
+                            onClick={handleStartCompeting}
+                            variant="primary"
+                            size="lg"
+                            className="min-w-[200px]"
                         >
                             Start Competing
-                            <ArrowRightIcon className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                        </button>
-                        <button className="px-8 py-4 bg-transparent border-2 border-gray-900 dark:border-white text-black dark:text-white font-bold text-lg rounded-full hover:bg-gray-100 dark:hover:bg-white/10 transition-colors backdrop-blur-sm">
-                            View Roadmap
-                        </button>
+                            <RocketLaunchIcon className="h-5 w-5" />
+                        </MagneticButton>
+                        <MagneticButton
+                            onClick={() => navigate('/explore')}
+                            variant="secondary"
+                            size="lg"
+                        >
+                            Browse Challenges
+                            <ArrowRightIcon className="h-5 w-5" />
+                        </MagneticButton>
                     </motion.div>
 
                     {/* User Stats / Social Proof */}
@@ -70,15 +96,15 @@ export default function LandingPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.6, duration: 0.8 }}
-                        className="mt-16 flex items-center gap-3 bg-white/50 dark:bg-black/50 backdrop-blur-md px-6 py-3 rounded-full border border-gray-200 dark:border-gray-800"
+                        className="mt-16 flex items-center gap-3 bg-white/5 backdrop-blur-md px-6 py-3 rounded-full border border-white/10"
                     >
                         <div className="flex -space-x-2">
                             {[1, 2, 3].map((i) => (
-                                <div key={i} className="h-8 w-8 rounded-full bg-gradient-to-br from-gray-300 to-gray-400 border-2 border-white dark:border-black" />
+                                <div key={i} className="h-8 w-8 rounded-full bg-gradient-to-br from-gray-600 to-gray-800 border-2 border-neon-black" />
                             ))}
                         </div>
-                        <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                            <span className="font-bold">500+</span> Live Competitions
+                        <div className="text-sm font-semibold text-gray-200">
+                            <span className="font-bold text-white">500+</span> Live Competitions
                         </div>
                     </motion.div>
                 </div>
@@ -90,11 +116,10 @@ export default function LandingPage() {
                     transition={{ delay: 0.8 }}
                     className="mt-32"
                 >
-                    <h3 className="text-2xl font-bold mb-8 text-black dark:text-white">Used by students from.</h3>
-                    <div className="flex flex-wrap gap-8 md:gap-16 items-center opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
-                        {/* Placeholders for logos */}
+                    <h3 className="text-sm font-bold mb-8 text-white/40 text-center uppercase tracking-[0.3em] font-display">Used by students from</h3>
+                    <div className="flex flex-wrap justify-center gap-8 md:gap-16 items-center opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
                         {['IIT Bombay', 'BITS Pilani', 'NIT Trichy', 'IIIT Hyderabad', 'DTU'].map((brand) => (
-                            <span key={brand} className="text-2xl md:text-3xl font-bold text-black dark:text-white">{brand}</span>
+                            <span key={brand} className="text-2xl md:text-3xl font-bold text-white hover:text-neon-limit transition-colors cursor-default">{brand}</span>
                         ))}
                     </div>
                 </motion.div>
@@ -123,18 +148,37 @@ export default function LandingPage() {
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
-                            transition={{ delay: i * 0.2 }}
-                            className="p-8 rounded-3xl bg-black/90 dark:bg-white/5 text-white backdrop-blur-lg border border-gray-800 dark:border-white/10 hover:border-lime-400/50 transition-colors group"
+                            transition={{ delay: i * 0.15 }}
+                            whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                            className="p-8 rounded-xl bg-white/5 text-white backdrop-blur-lg border border-white/5 hover:border-neon-limit/50 transition-all group relative overflow-hidden"
+                            style={{
+                                clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)',
+                            }}
                         >
-                            <div className="h-12 w-12 rounded-full bg-gray-800 dark:bg-white/10 flex items-center justify-center text-lime-400 mb-6 group-hover:bg-lime-400 group-hover:text-black transition-colors">
+                            {/* Chamfered corner visual */}
+                            <div className="absolute top-0 right-0 w-4 h-4 bg-neon-black" 
+                                style={{ clipPath: 'polygon(100% 0, 0 0, 100% 100%)' }} 
+                            />
+                            
+                            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                                 {feature.icon}
                             </div>
-                            <h3 className="text-xl font-bold mb-3 text-white">{feature.title}</h3>
+                            <div className="h-12 w-12 rounded-lg bg-white/10 flex items-center justify-center text-neon-limit mb-6 group-hover:bg-neon-limit group-hover:text-black transition-all duration-300">
+                                {feature.icon}
+                            </div>
+                            <h3 className="text-xl font-bold mb-3 text-white font-display">{feature.title}</h3>
                             <p className="text-gray-400 text-sm leading-relaxed">{feature.desc}</p>
                         </motion.div>
                     ))}
                 </div>
             </div>
+
+            {/* Onboarding Wizard Modal */}
+            <OnboardingWizard
+                isOpen={showOnboarding}
+                onComplete={handleOnboardingComplete}
+                onClose={() => setShowOnboarding(false)}
+            />
         </div>
     );
 }

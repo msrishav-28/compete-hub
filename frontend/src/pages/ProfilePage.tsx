@@ -1,11 +1,15 @@
 import { motion } from 'framer-motion';
-import { TrophyIcon, AcademicCapIcon, FlagIcon, Cog6ToothIcon, ArrowTrendingUpIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline';
+import { AcademicCapIcon, FlagIcon, Cog6ToothIcon, ArrowTrendingUpIcon, ArrowTopRightOnSquareIcon, ShareIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import Card, { CardContent, CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import TextScramble from '../components/ui/TextScramble';
+import MagneticButton from '../components/ui/MagneticButton';
+import ResumeExport from '../components/ResumeExport';
 import { useCompetitionStore } from '../store/useCompetitionStore';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCompetitions, fetchUserAnalytics, fetchRecommendations, Recommendation } from '../api/competitions';
+import { Link } from 'react-router-dom';
 
 export default function ProfilePage() {
   const { savedCompetitions } = useCompetitionStore();
@@ -15,7 +19,7 @@ export default function ProfilePage() {
 
   const saved = competitions?.filter(c => savedCompetitions.includes(c.id)) || [];
 
-  // Use analytics from server if available, fallback to local calculation for display
+  // Use analytics from server if available, fallback...
   const stats = analytics || {
     competitions_entered: 0,
     competitions_won: 0,
@@ -29,175 +33,185 @@ export default function ProfilePage() {
   const platformsUsed = Array.from(new Set(saved.map(c => c.platform)));
 
   return (
-    <div className="min-h-screen pt-24 pb-20 bg-black text-white relative overflow-hidden">
+    <div className="min-h-screen pt-24 pb-20 relative overflow-hidden">
       {/* Ambient Gradient */}
-      <div className="absolute top-0 right-0 h-[500px] w-[500px] bg-brand-lime/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-20 left-0 h-[300px] w-[300px] bg-white/5 rounded-full blur-3xl pointer-events-none" />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        {/* Header */}
+
+        {/* Header Actions */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-12 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          className="flex justify-between items-center mb-6"
         >
-          <div>
-            <h1 className="text-4xl md:text-5xl font-black mb-2 uppercase font-display tracking-tight">
-              <span className="text-white">Profile</span>
-            </h1>
-            <p className="text-gray-400 text-lg">Manage your identity and preferences.</p>
+          <h1 className="text-3xl md:text-4xl font-black uppercase font-display tracking-tight">
+            <TextScramble text="PILOT" className="text-white" duration={500} />
+            <span className="text-neon-limit ml-2">
+              <TextScramble text="PROFILE" className="text-neon-limit" duration={500} delay={100} />
+            </span>
+          </h1>
+          <div className="flex gap-2">
+            <MagneticButton variant="secondary" size="sm" className="rounded-lg">
+              <ShareIcon className="h-4 w-4 mr-1" />
+              Share
+            </MagneticButton>
+            <MagneticButton variant="ghost" size="sm" className="rounded-lg">
+              <Cog6ToothIcon className="h-4 w-4" />
+            </MagneticButton>
           </div>
-          <Button variant="outline" className="border-white/10 hover:bg-white/5 text-white self-start sm:self-auto">
-            <Cog6ToothIcon className="h-5 w-5 mr-2" />
-            Settings
-          </Button>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Profile Card */}
-          <div className="lg:col-span-1">
-            <Card glass className="bg-white/5 border-white/5 h-full">
-              <CardContent className="text-center pt-12 pb-8">
-                <div className="w-32 h-32 mx-auto mb-6 rounded-full bg-gradient-to-br from-brand-lime/80 to-green-500/80 p-0.5 shadow-2xl shadow-brand-lime/20">
-                  <div className="w-full h-full rounded-full bg-black flex items-center justify-center border-4 border-black">
-                    <AcademicCapIcon className="h-14 w-14 text-white" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+          {/* LEFT COLUMN: IDENTITY CARD (Sticky) */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+            className="lg:col-span-4 lg:sticky lg:top-24 h-fit"
+          >
+            <Card glass className="bg-white/5 border-white/5 overflow-hidden relative">
+              {/* Holographic header effect */}
+              <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-neon-limit/20 to-transparent opacity-50" />
+
+              <CardContent className="text-center pt-12 pb-8 relative z-10">
+                <div className="w-32 h-32 mx-auto mb-6 rounded-full p-1 border-2 border-neon-limit shadow-[0_0_20px_rgba(163,230,53,0.3)] bg-black">
+                  <div className="w-full h-full rounded-full bg-white/10 flex items-center justify-center overflow-hidden">
+                    <AcademicCapIcon className="h-16 w-16 text-white" />
                   </div>
                 </div>
-                <h2 className="text-2xl font-bold text-white mb-1 font-display tracking-wide">
+
+                <h2 className="text-3xl font-black text-white mb-1 font-display tracking-tight uppercase">
                   Competitor
                 </h2>
-                <p className="text-brand-lime font-medium mb-8 uppercase tracking-widest text-xs">
-                  Engineering Student
-                </p>
+                <div className="flex justify-center gap-2 mb-8">
+                  <Badge variant="lime" className="text-[10px] uppercase tracking-widest px-2">Level 12</Badge>
+                  <Badge variant="default" className="text-[10px] uppercase tracking-widest px-2">Engineering</Badge>
+                </div>
 
-                <div className="space-y-4 text-left">
-                  <div className="flex items-center justify-between p-4 bg-black/40 border border-white/5 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <TrophyIcon className="h-5 w-5 text-gray-400" />
-                      <span className="text-sm text-gray-300 font-medium">Saved</span>
-                    </div>
-                    <span className="font-bold text-white text-lg">{saved.length}</span>
+                {/* Key Stats Row */}
+                <div className="grid grid-cols-2 gap-2 mb-6">
+                  <div className="p-3 bg-black/40 rounded border border-white/5">
+                    <div className="text-xs text-gray-500 uppercase font-bold">Win Rate</div>
+                    <div className="text-xl font-bold text-white">{stats.win_rate?.toFixed(0) || 0}%</div>
                   </div>
-
-                  <div className="flex items-center justify-between p-4 bg-black/40 border border-white/5 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <FlagIcon className="h-5 w-5 text-gray-400" />
-                      <span className="text-sm text-gray-300 font-medium">Categories</span>
-                    </div>
-                    <span className="font-bold text-white text-lg">{stats.specializations?.length || 0}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-black/40 border border-white/5 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <ArrowTrendingUpIcon className="h-5 w-5 text-gray-400" />
-                      <span className="text-sm text-gray-300 font-medium">Win Rate</span>
-                    </div>
-                    <span className="font-bold text-white text-lg">{stats.win_rate?.toFixed(0) || 0}%</span>
+                  <div className="p-3 bg-black/40 rounded border border-white/5">
+                    <div className="text-xs text-gray-500 uppercase font-bold">Saved</div>
+                    <div className="text-xl font-bold text-white">{saved.length}</div>
                   </div>
                 </div>
+
+                {/* XP Progress */}
+                <div className="text-left mb-2">
+                  <div className="flex justify-between text-xs font-bold text-gray-400 mb-1">
+                    <span>XP PROGRESS</span>
+                    <span>1,200 / 2,000</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-neon-limit w-[60%]" />
+                  </div>
+                </div>
+
               </CardContent>
             </Card>
-          </div>
+          </motion.div>
 
-          {/* Details */}
-          <div className="lg:col-span-2 space-y-8">
-            {/* Interests */}
+          {/* RIGHT COLUMN: DETAILS & LOGS */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+            className="lg:col-span-8 space-y-6"
+          >
+
+            {/* INVENTORY / TECH STACK */}
             <Card glass className="bg-white/5 border-white/5">
-              <CardHeader className="border-b border-white/5 pb-6">
-                <h3 className="text-lg font-bold text-white font-display uppercase tracking-wide">Your Interests</h3>
+              <CardHeader className="border-b border-white/5 py-4">
+                <h3 className="text-sm font-bold text-white font-display uppercase tracking-widest flex items-center gap-2">
+                  <FlagIcon className="h-4 w-4 text-neon-limit" />
+                  Interest Inventory
+                </h3>
               </CardHeader>
-              <CardContent className="pt-8">
-                <div className="space-y-8">
+              <CardContent className="pt-6">
+                <div className="space-y-6">
                   <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
-                      Categories
-                    </h4>
+                    <p className="text-xs text-gray-500 font-bold mb-3 uppercase">Class Specializations</p>
                     <div className="flex flex-wrap gap-2">
                       {categoriesInterested.length > 0 ? (
                         categoriesInterested.map((cat) => (
-                          <Badge key={cat} variant="info" className="bg-blue-500/10 text-blue-400 border-blue-500/20 py-2 px-3">
+                          <Badge key={cat} variant="default" className="bg-white/5 border-white/10 hover:border-neon-limit/50 transition-colors py-1.5 px-3 uppercase tracking-wider text-xs">
                             {cat.replace('_', ' ')}
                           </Badge>
                         ))
-                      ) : (
-                        <p className="text-sm text-gray-500 italic">
-                          Start saving competitions to see your interests
-                        </p>
-                      )}
+                      ) : <span className="text-gray-600 text-sm italic">None equipped.</span>}
                     </div>
                   </div>
-
                   <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
-                      Platforms
-                    </h4>
+                    <p className="text-xs text-gray-500 font-bold mb-3 uppercase">Active Platforms</p>
                     <div className="flex flex-wrap gap-2">
                       {platformsUsed.length > 0 ? (
                         platformsUsed.map((platform) => (
-                          <Badge key={platform} variant="purple" className="bg-purple-500/10 text-purple-400 border-purple-500/20 py-2 px-3">
+                          <Badge key={platform} variant="purple" className="py-1.5 px-3 uppercase tracking-wider text-xs">
                             {platform}
                           </Badge>
                         ))
-                      ) : (
-                        <p className="text-sm text-gray-500 italic">
-                          No platforms tracked yet
-                        </p>
-                      )}
+                      ) : <span className="text-gray-600 text-sm italic">None detected.</span>}
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Recent Activity */}
+            {/* RECOMMENDED QUESTS */}
             <Card glass className="bg-white/5 border-white/5">
-              <CardHeader className="border-b border-white/5 pb-6">
-                <h3 className="text-lg font-bold text-white font-display uppercase tracking-wide">Recent Activity</h3>
+              <CardHeader className="border-b border-white/5 py-4 flex justify-between items-center">
+                <h3 className="text-sm font-bold text-white font-display uppercase tracking-widest flex items-center gap-2">
+                  <ArrowTrendingUpIcon className="h-4 w-4 text-neon-limit" />
+                  Recommended Missions
+                </h3>
+                <Button variant="ghost" size="sm" className="text-xs">Refine Algorithm</Button>
               </CardHeader>
-              <CardContent>
-                <div className="text-center py-12">
-                  <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-white/5 mb-4">
-                    <ArrowTrendingUpIcon className="h-8 w-8 text-gray-600" />
-                  </div>
-                  <p className="text-white font-bold text-lg mb-1">No recent activity</p>
-                  <p className="text-sm text-gray-500">Participate in competitions to build your history</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recommended for You */}
-            <Card glass className="bg-white/5 border-white/5">
-              <CardHeader className="border-b border-white/5 pb-6">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-bold text-white font-display uppercase tracking-wide">Recommended For You</h3>
-                  <Button variant="outline" size="sm" className="border-white/10 hover:bg-white/5 text-white text-xs">
-                    View All
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
+              <CardContent className="p-0">
                 {recommendations && recommendations.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="divide-y divide-white/5">
                     {recommendations.slice(0, 3).map((rec: Recommendation) => (
-                      <div key={rec.competition.id} className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/5 hover:border-brand-lime/30 transition-all cursor-pointer group">
-                        <div>
-                          <h4 className="font-bold text-white group-hover:text-brand-lime transition-colors">{rec.competition.title}</h4>
-                          <span className="text-xs text-gray-500">{rec.competition.platform} • {rec.match_score}% Match</span>
-                        </div>
-                        <ArrowTopRightOnSquareIcon className="h-4 w-4 text-gray-400 group-hover:text-brand-lime" />
-                      </div>
+                      <Link key={rec.competition.id} to={`/competitions/${rec.competition.id}`}>
+                        <motion.div 
+                          whileHover={{ x: 4, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                          className="p-4 flex items-center justify-between transition-colors group cursor-pointer"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="h-10 w-10 rounded bg-neon-limit/10 flex items-center justify-center text-neon-limit text-xs font-bold">
+                              {rec.match_score}%
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-white group-hover:text-neon-limit transition-colors">{rec.competition.title}</h4>
+                              <span className="text-xs text-gray-500">{rec.competition.platform}</span>
+                            </div>
+                          </div>
+                          <ArrowTopRightOnSquareIcon className="h-4 w-4 text-gray-400 group-hover:text-white transition-colors" />
+                        </motion.div>
+                      </Link>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-12">
-                    <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-white/5 mb-4">
-                      <AcademicCapIcon className="h-8 w-8 text-gray-600" />
-                    </div>
-                    <p className="text-gray-400 text-sm max-w-xs mx-auto">Complete your profile to get personalized recommendations.</p>
+                  <div className="p-8 text-center text-gray-500 text-sm flex flex-col items-center gap-3">
+                    <SparklesIcon className="w-8 h-8 opacity-30" />
+                    <p>Save competitions to unlock personalized recommendations.</p>
                   </div>
                 )}
               </CardContent>
             </Card>
-          </div>
+
+            {/* CAREER INTEL EXPORT */}
+            <Card glass className="bg-white/5 border-white/5">
+              <CardContent className="p-6">
+                <ResumeExport />
+              </CardContent>
+            </Card>
+
+          </motion.div>
         </div>
       </div>
     </div>
