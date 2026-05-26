@@ -41,6 +41,25 @@ isn't wired up yet, so the API is the only thing talking to the DB.
 6. Deploy. First boot opens the DB pool and starts a background scrape;
    `/health` is reachable immediately.
 
+### 2b. Render Cron Service (periodic refresh)
+
+`backend/render.yaml` also declares a second service of `type: cron`
+named **competehub-refresh**. Render creates it alongside the web
+service from the same blueprint.
+
+| Setting | Value |
+|---|---|
+| Schedule | `0 */6 * * *` (every 6 hours) |
+| Start command | `python -m backend.cron refresh` |
+| Env vars | Same `DATABASE_URL` + optional `KAGGLE_*` / `CLIST_*` as the web service |
+
+The cron job:
+- Opens the asyncpg pool, runs the same `FetcherService` the API uses, closes the pool, exits.
+- Honours each source's TTL (`CACHE_TTL_HOURS`, default 24) so successive runs cost nothing when nothing has changed.
+- The Postgres advisory lock inside `FetcherService` means a cron run and a manual `POST /api/refresh` cannot double-scrape the same source even if they overlap exactly.
+
+You can force a full refresh via `python -m backend.cron refresh --force` (locally) or by triggering the cron from the Render dashboard's "Run job" button.
+
 ---
 
 ## 3. Vercel (frontend)
@@ -67,7 +86,8 @@ origin. Render auto-redeploys.
 
 ## Operations
 
-- **Manual refresh:**
+- **Scheduled refresh:** The `competehub-refresh` cron service runs every 6 hours automatically. To trigger it manually, use Render's dashboard → competehub-refresh → "Run job".
+- **Manual refresh (via API):**
   ```bash
   curl -X POST https://your-api.onrender.com/api/refresh \
        -H "X-Admin-Key: $ADMIN_KEY"
@@ -77,6 +97,7 @@ origin. Render auto-redeploys.
   curl https://your-api.onrender.com/api/refresh/status \
        -H "X-Admin-Key: $ADMIN_KEY"
   ```
+  Per-source `last_updated`, `last_status` (ok / empty / timeout / error: …), and `competition_count`.
 - **Health:** `GET /health` returns HTTP 503 when the DB is unreachable —
   Render's load balancer will route traffic away automatically.
 

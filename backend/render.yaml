@@ -1,4 +1,7 @@
 services:
+  # ------------------------------------------------------------------
+  # Web API
+  # ------------------------------------------------------------------
   - type: web
     name: competehub-api
     runtime: python
@@ -26,3 +29,32 @@ services:
         sync: false   # Optional — enables the clist.by fetcher
       - key: CLIST_API_KEY
         sync: false   # Optional — enables the clist.by fetcher
+
+  # ------------------------------------------------------------------
+  # Scheduled refresh — runs every 6 hours, completely separate from
+  # the API process. Honours the same TTL so it costs us nothing when
+  # nothing has changed.
+  # ------------------------------------------------------------------
+  - type: cron
+    name: competehub-refresh
+    runtime: python
+    region: oregon
+    plan: free
+    schedule: "0 */6 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.cron refresh
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: KAGGLE_USERNAME
+        sync: false
+      - key: KAGGLE_KEY
+        sync: false
+      - key: CLIST_USERNAME
+        sync: false
+      - key: CLIST_API_KEY
+        sync: false
