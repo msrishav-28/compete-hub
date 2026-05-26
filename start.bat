@@ -95,15 +95,8 @@ if not exist "node_modules" (
 cd ..
 echo.
 
-REM ===== Create Required Directories =====
-echo [5/6] Setting up data directories...
-if not exist "data" mkdir data
-if not exist "data\users" mkdir data\users
-echo   [OK] Data directories ready
-echo.
-
 REM ===== Start Services =====
-echo [6/6] Starting services...
+echo [5/5] Starting services...
 echo.
 echo   Starting Backend on port 8000...
 start "CompeteHub Backend" cmd /k "cd /d "%~dp0" && call venv\Scripts\activate.bat && cd backend && python main.py"

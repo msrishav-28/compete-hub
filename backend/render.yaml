@@ -5,16 +5,24 @@ services:
     region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
+    startCommand: gunicorn backend.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
       - key: ENVIRONMENT
         value: production
-      - key: MONGODB_URL
-        sync: false  # Set in Render dashboard - your MongoDB Atlas connection string
-      - key: DB_NAME
-        value: competehub
+      - key: DATABASE_URL
+        sync: false   # Supabase Postgres connection string
       - key: CORS_ORIGINS
-        sync: false  # Set to your frontend URL (e.g., https://competehub.vercel.app)
+        sync: false   # https://your-frontend.vercel.app
+      - key: ADMIN_KEY
+        sync: false   # Long random string, required for POST /api/refresh
+      - key: KAGGLE_USERNAME
+        sync: false   # Optional — enables the Kaggle fetcher
+      - key: KAGGLE_KEY
+        sync: false   # Optional — enables the Kaggle fetcher
+      - key: CLIST_USERNAME
+        sync: false   # Optional — enables the clist.by fetcher
+      - key: CLIST_API_KEY
+        sync: false   # Optional — enables the clist.by fetcher

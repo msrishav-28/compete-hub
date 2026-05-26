@@ -1,158 +1,94 @@
-# Deployment Guide
+# Deployment
 
-Deploy CompeteHub using Vercel (frontend) and Render (backend) with MongoDB Atlas.
-
----
-
-## Prerequisites
-
-- GitHub repository with CompeteHub code
-- MongoDB Atlas account
-- Vercel account
-- Render account
+Vercel (frontend) · Render (backend) · Supabase (Postgres).
 
 ---
 
-## Step 1: MongoDB Atlas Setup
+## 1. Supabase
 
-1. Sign in at [mongodb.com/atlas](https://www.mongodb.com/atlas)
-2. Create a free M0 cluster
-3. Configure database access:
-   - Security > Database Access > Add New Database User
-   - Create user with password (save credentials)
-4. Configure network access:
-   - Security > Network Access > Add IP Address
-   - Select "Allow Access from Anywhere" (0.0.0.0/0)
-5. Get connection string:
-   - Deployment > Database > Connect > Connect your application
-   - Copy connection string
-   - Replace `<password>` with your database user password
+1. Create a project at [supabase.com](https://supabase.com).
+2. **SQL editor** → paste `backend/schema.sql` → **Run**. The script is
+   idempotent — safe to re-run if you tweak it.
+3. **Project Settings → Database → Connection string** → copy the *direct*
+   URI (not pgbouncer):
+   ```
+   postgresql://postgres:<PASSWORD>@db.<PROJECT_REF>.supabase.co:5432/postgres
+   ```
 
----
-
-## Step 2: Backend Deployment (Render)
-
-1. Sign in at [render.com](https://render.com) with GitHub
-2. New > Web Service > Connect your repository
-3. Set Root Directory to `backend`
-4. Configuration is auto-detected from `backend/render.yaml`:
-
-| Setting | Value |
-|---------|-------|
-| Name | competehub-api |
-| Root Directory | backend |
-| Runtime | Python |
-| Build Command | pip install -r requirements.txt |
-| Start Command | gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120 |
-
-4. Set environment variables:
-
-| Variable | Value |
-|----------|-------|
-| MONGODB_URL | Your MongoDB Atlas connection string |
-| DB_NAME | competehub |
-| ENVIRONMENT | production |
-| CORS_ORIGINS | https://your-app.vercel.app |
-
-5. Deploy and copy your Render URL
+That's it. No tables to create manually, no RLS policies to write — auth
+isn't wired up yet, so the API is the only thing talking to the DB.
 
 ---
 
-## Step 3: Frontend Deployment (Vercel)
+## 2. Render (backend)
 
-1. Sign in at [vercel.com](https://vercel.com) with GitHub
-2. New Project > Import your repository
-3. Configuration is auto-detected from `vercel.json`:
+1. Sign in at [render.com](https://render.com) with GitHub.
+2. **New → Web Service →** connect this repo.
+3. **Root directory:** `backend`.
+4. Render auto-detects `backend/render.yaml`. Confirm:
+   - Build: `pip install -r requirements.txt`
+   - Start: `gunicorn backend.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120`
+   - Health: `/health`
+5. Set environment variables in the Render dashboard:
 
-| Setting | Value |
-|---------|-------|
-| Framework Preset | Vite |
-| Root Directory | frontend |
-| Build Command | npm run build |
-| Output Directory | dist |
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | Your Supabase URI from step 1 |
+   | `CORS_ORIGINS` | `https://your-frontend.vercel.app` (no trailing slash) |
+   | `ADMIN_KEY` | A long random string — `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+   | `ENVIRONMENT` | `production` |
 
+6. Deploy. First boot opens the DB pool and starts a background scrape;
+   `/health` is reachable immediately.
+
+---
+
+## 3. Vercel (frontend)
+
+1. Sign in at [vercel.com](https://vercel.com) with GitHub.
+2. **New Project → import this repo**.
+3. Root directory: `frontend`. Vercel auto-detects Vite.
 4. Set environment variable:
 
-| Variable | Value |
-|----------|-------|
-| VITE_API_URL | Your Render backend URL (e.g., https://competehub-api.onrender.com) |
+   | Variable | Value |
+   |---|---|
+   | `VITE_API_URL` | Your Render URL, e.g. `https://competehub-api.onrender.com` |
 
-5. Deploy and copy your Vercel URL
-
----
-
-## Step 4: Update CORS
-
-1. Return to Render dashboard
-2. Update CORS_ORIGINS with your Vercel URL:
-   ```
-   https://your-app.vercel.app
-   ```
-3. Render will auto-redeploy
+5. Deploy.
 
 ---
 
-## Verification
+## 4. Wire CORS
 
-| Check | URL | Expected |
-|-------|-----|----------|
-| Backend health | https://your-backend.onrender.com/health | JSON with status: healthy |
-| API docs | https://your-backend.onrender.com/docs | Swagger UI |
-| Frontend | https://your-app.vercel.app | Landing page |
-| Data loading | Navigate to Explore | Competitions list |
+After Vercel gives you a URL, update `CORS_ORIGINS` on Render to that exact
+origin. Render auto-redeploys.
 
 ---
 
-## Environment Variables Reference
+## Operations
 
-### Backend
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| MONGODB_URL | Yes | MongoDB Atlas connection string |
-| DB_NAME | Yes | Database name (competehub) |
-| ENVIRONMENT | No | production or development |
-| CORS_ORIGINS | Yes | Comma-separated allowed origins |
-| CACHE_TTL_HOURS | No | Cache duration (default: 24) |
-
-### Frontend
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| VITE_API_URL | Yes | Backend API URL |
+- **Manual refresh:**
+  ```bash
+  curl -X POST https://your-api.onrender.com/api/refresh \
+       -H "X-Admin-Key: $ADMIN_KEY"
+  ```
+- **Source status:**
+  ```bash
+  curl https://your-api.onrender.com/api/refresh/status \
+       -H "X-Admin-Key: $ADMIN_KEY"
+  ```
+- **Health:** `GET /health` returns HTTP 503 when the DB is unreachable —
+  Render's load balancer will route traffic away automatically.
 
 ---
 
 ## Troubleshooting
 
-### CORS Errors
-- Verify CORS_ORIGINS matches your Vercel URL exactly (no trailing slash)
-- Redeploy backend after changing environment variables
-
-### Database Connection Errors
-- Verify MongoDB Atlas IP whitelist includes 0.0.0.0/0
-- Check connection string has correct password (no `<password>` placeholder)
-- Ensure password special characters are URL-encoded
-
-### API Not Loading
-- Test backend health endpoint directly
-- Check Render logs for startup errors
-- Verify VITE_API_URL in Vercel settings
-
-### Build Failures
-- Backend: Verify Python 3.10+ and all requirements.txt dependencies
-- Frontend: Verify Node.js 18+ and run `npm run build` locally to check
-
----
-
-## Custom Domain
-
-**Vercel:**
-1. Settings > Domains > Add Domain
-2. Configure DNS as instructed
-
-**Render:**
-1. Settings > Custom Domains > Add Custom Domain
-2. Configure DNS records
-
-After adding custom domain, update CORS_ORIGINS on Render.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `/health` returns 503 in prod | `DATABASE_URL` wrong or DB unreachable | Re-copy from Supabase. Use the direct URL, not pgbouncer's transaction-mode URL. |
+| `/api/refresh` returns 403 | Missing/wrong `X-Admin-Key` header | Match the `ADMIN_KEY` env var exactly. |
+| `/api/refresh` returns 503 | `ADMIN_KEY` not set | Set it in Render env vars and redeploy. |
+| Empty competitions after deploy | Initial fetch still running, or all scrapers failed | Hit `/api/refresh/status` — `last_status` will show per-source errors. |
+| CORS errors in browser | `CORS_ORIGINS` doesn't match the Vercel URL | Update Render env var; no trailing slash; redeploy. |
+| `relation "competitions" does not exist` | `schema.sql` not run | Run it in Supabase SQL editor. |

@@ -1,40 +1,145 @@
 """
-Competition repository for data access operations.
-Handles all database operations related to competitions.
+Competition data access. All SQL lives here.
 """
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-from motor.motor_asyncio import AsyncIOMotorDatabase
+import json
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
-from .base import BaseRepository
+import asyncpg
+
+from .base import record_to_dict, records_to_dicts
 
 logger = logging.getLogger(__name__)
 
 
-class CompetitionRepository(BaseRepository):
-    """Repository for competition data access."""
-    
-    def __init__(self, db: AsyncIOMotorDatabase):
-        super().__init__(db, "competitions")
-    
-    async def get_by_id(self, competition_id: str) -> Optional[Dict[str, Any]]:
-        """Get a competition by its ID."""
-        return await self.find_one({"id": competition_id})
-    
-    async def get_all(
-        self,
-        limit: Optional[int] = None,
-        skip: int = 0
-    ) -> List[Dict[str, Any]]:
-        """Get all competitions with pagination."""
-        return await self.find_many(
-            filter_dict={},
-            sort=[("start_date", 1)],
-            limit=limit,
-            skip=skip
-        )
-    
+# Columns in the order we read / write them. Centralised so the SELECT
+# projection and the upsert can't drift apart.
+COMPETITION_COLUMNS: tuple[str, ...] = (
+    "id", "title", "description", "category", "subcategory", "platform",
+    "company", "start_date", "end_date", "registration_deadline",
+    "duration_hours", "time_commitment", "difficulty", "skills_required",
+    "team_size", "location", "prize", "link", "registration_link",
+    "leaderboard_link", "tags", "recruitment_potential",
+    "companies_recruiting", "portfolio_value", "source",
+    "last_updated", "scraped_at",
+)
+
+_SELECT_ALL = f"SELECT {', '.join(COMPETITION_COLUMNS)} FROM competitions"
+
+
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    """
+    Fetchers sometimes hand us naive datetimes or ISO strings. Postgres
+    TIMESTAMPTZ wants tz-aware datetimes. Normalise everything to UTC.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _prepare_competition_row(comp: dict[str, Any]) -> tuple:
+    """
+    Normalise a raw competition dict into the positional tuple the
+    upsert statement expects. Missing values become NULL / defaults.
+    """
+    now = datetime.now(timezone.utc)
+    prize = comp.get("prize")
+    if isinstance(prize, dict):
+        prize = json.dumps(prize)
+
+    return (
+        comp.get("id"),
+        comp.get("title"),
+        comp.get("description"),
+        comp.get("category"),
+        comp.get("subcategory"),
+        comp.get("platform"),
+        comp.get("company"),
+        _coerce_datetime(comp.get("start_date")),
+        _coerce_datetime(comp.get("end_date")),
+        _coerce_datetime(comp.get("registration_deadline")),
+        comp.get("duration_hours"),
+        comp.get("time_commitment"),
+        comp.get("difficulty"),
+        list(comp.get("skills_required") or []),
+        comp.get("team_size"),
+        comp.get("location"),
+        prize,
+        comp.get("link"),
+        comp.get("registration_link"),
+        comp.get("leaderboard_link"),
+        list(comp.get("tags") or []),
+        bool(comp.get("recruitment_potential") or False),
+        list(comp.get("companies_recruiting") or []),
+        int(comp.get("portfolio_value") or 50),
+        comp.get("source"),
+        _coerce_datetime(comp.get("last_updated")) or now,
+        _coerce_datetime(comp.get("scraped_at")) or now,
+    )
+
+
+# Pre-built upsert. The ON CONFLICT clause makes the operation idempotent:
+# re-running the same fetcher never creates duplicates.
+_UPSERT_SQL = f"""
+INSERT INTO competitions ({', '.join(COMPETITION_COLUMNS)})
+VALUES ({', '.join(f'${i+1}' for i in range(len(COMPETITION_COLUMNS)))})
+ON CONFLICT (id) DO UPDATE SET
+    title = EXCLUDED.title,
+    description = EXCLUDED.description,
+    category = EXCLUDED.category,
+    subcategory = EXCLUDED.subcategory,
+    platform = EXCLUDED.platform,
+    company = EXCLUDED.company,
+    start_date = EXCLUDED.start_date,
+    end_date = EXCLUDED.end_date,
+    registration_deadline = EXCLUDED.registration_deadline,
+    duration_hours = EXCLUDED.duration_hours,
+    time_commitment = EXCLUDED.time_commitment,
+    difficulty = EXCLUDED.difficulty,
+    skills_required = EXCLUDED.skills_required,
+    team_size = EXCLUDED.team_size,
+    location = EXCLUDED.location,
+    prize = EXCLUDED.prize,
+    link = EXCLUDED.link,
+    registration_link = EXCLUDED.registration_link,
+    leaderboard_link = EXCLUDED.leaderboard_link,
+    tags = EXCLUDED.tags,
+    recruitment_potential = EXCLUDED.recruitment_potential,
+    companies_recruiting = EXCLUDED.companies_recruiting,
+    portfolio_value = EXCLUDED.portfolio_value,
+    source = EXCLUDED.source,
+    last_updated = EXCLUDED.last_updated,
+    scraped_at = EXCLUDED.scraped_at
+"""
+
+
+class CompetitionRepository:
+    def __init__(self, pool: asyncpg.Pool):
+        self.pool = pool
+
+    # ---------- reads ----------
+
+    async def get_by_id(self, competition_id: str) -> Optional[dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(f"{_SELECT_ALL} WHERE id = $1", competition_id)
+        return record_to_dict(row)
+
+    async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
+        if not ids:
+            return []
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(f"{_SELECT_ALL} WHERE id = ANY($1::text[])", ids)
+        return records_to_dicts(rows)
+
     async def get_filtered(
         self,
         category: Optional[str] = None,
@@ -44,202 +149,147 @@ class CompetitionRepository(BaseRepository):
         recruitment_only: bool = False,
         search: Optional[str] = None,
         limit: int = 100,
-        skip: int = 0
-    ) -> tuple[List[Dict[str, Any]], int]:
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
         """
-        Get filtered competitions with total count.
-        Returns (competitions, total_count) tuple.
+        Return (rows, total_count) for the given filters.
+        Search uses Postgres full-text search (GIN-indexed), so user
+        input is safe and never interpreted as regex.
         """
-        # Build filter
-        filter_dict: Dict[str, Any] = {}
-        
+        clauses: list[str] = []
+        args: list[Any] = []
+
+        def add(clause: str, value: Any) -> None:
+            args.append(value)
+            clauses.append(clause.replace("?", f"${len(args)}"))
+
         if category:
-            filter_dict["category"] = category
-        
+            add("category = ?", category)
         if difficulty:
-            filter_dict["difficulty"] = difficulty
-        
+            add("difficulty = ?", difficulty)
         if time_commitment:
-            filter_dict["time_commitment"] = time_commitment
-        
+            add("time_commitment = ?", time_commitment)
         if platform:
-            filter_dict["platform"] = {"$regex": f"^{platform}$", "$options": "i"}
-        
+            add("LOWER(platform) = LOWER(?)", platform)
         if recruitment_only:
-            filter_dict["recruitment_potential"] = True
-        
-        # For text search, use regex (text index would be better for production)
+            clauses.append("recruitment_potential = TRUE")
         if search:
-            search_lower = search.lower()
-            filter_dict["$or"] = [
-                {"title": {"$regex": search, "$options": "i"}},
-                {"description": {"$regex": search, "$options": "i"}},
-                {"platform": {"$regex": search, "$options": "i"}},
-                {"tags": {"$regex": search, "$options": "i"}}
-            ]
-        
-        # Get total count
-        total = await self.count(filter_dict)
-        
-        # Get paginated results
-        competitions = await self.find_many(
-            filter_dict=filter_dict,
-            sort=[("start_date", 1)],
-            limit=limit,
-            skip=skip
-        )
-        
-        return competitions, total
-    
-    async def get_by_ids(self, competition_ids: List[str]) -> List[Dict[str, Any]]:
-        """Get multiple competitions by their IDs."""
-        if not competition_ids:
-            return []
-        return await self.find_many({"id": {"$in": competition_ids}})
-    
-    async def get_upcoming(
-        self, 
-        days: int = 7,
-        limit: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """Get competitions starting within the specified days."""
-        now = datetime.now()
-        end_date = now.isoformat()
-        
-        # Build date range filter
-        filter_dict = {
-            "start_date": {"$gte": now.isoformat()}
-        }
-        
-        competitions = await self.find_many(
-            filter_dict=filter_dict,
-            sort=[("start_date", 1)],
-            limit=limit
-        )
-        
-        # Filter by date range (since MongoDB date comparison can be tricky with ISO strings)
-        from datetime import timedelta
-        end_threshold = now + timedelta(days=days)
-        
-        filtered = []
-        for comp in competitions:
-            start_date_str = comp.get("start_date")
-            if start_date_str:
-                try:
-                    if isinstance(start_date_str, str):
-                        start_date = datetime.fromisoformat(
-                            start_date_str.replace("Z", "+00:00")
-                        )
-                    else:
-                        start_date = start_date_str
-                    
-                    if now <= start_date <= end_threshold:
-                        filtered.append(comp)
-                except (ValueError, TypeError):
-                    continue
-        
-        return filtered
-    
-    async def get_by_category(
-        self, 
-        category: str,
-        limit: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
-        """Get competitions by category."""
-        return await self.find_many(
-            filter_dict={"category": category},
-            sort=[("start_date", 1)],
-            limit=limit
-        )
-    
-    async def upsert_competition(self, competition: Dict[str, Any]) -> bool:
-        """Insert or update a competition."""
-        comp_id = competition.get("id")
-        if not comp_id:
-            logger.warning("Cannot upsert competition without ID")
-            return False
-        
-        return await self.upsert_one({"id": comp_id}, competition)
-    
-    async def upsert_many(self, competitions: List[Dict[str, Any]]) -> int:
-        """Bulk upsert competitions. Returns count of successful operations."""
-        count = 0
-        for comp in competitions:
-            try:
-                if await self.upsert_competition(comp):
-                    count += 1
-            except Exception as e:
-                logger.warning(f"Failed to upsert competition {comp.get('id')}: {e}")
-                continue
-        return count
-    
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get competition statistics using aggregation."""
-        pipeline = [
-            {
-                "$group": {
-                    "_id": None,
-                    "total": {"$sum": 1},
-                    "categories": {"$push": "$category"},
-                    "difficulties": {"$push": "$difficulty"},
-                    "platforms": {"$push": "$platform"}
-                }
-            }
-        ]
-        
-        results = await self.aggregate(pipeline)
-        
-        if not results:
-            return {
-                "total": 0,
-                "categories": {},
-                "difficulties": {},
-                "platforms": {}
-            }
-        
-        result = results[0]
-        
-        # Count occurrences
-        def count_items(items: List) -> Dict[str, int]:
-            counts = {}
-            for item in items:
-                if item:
-                    counts[item] = counts.get(item, 0) + 1
-            return counts
-        
-        return {
-            "total": result.get("total", 0),
-            "categories": count_items(result.get("categories", [])),
-            "difficulties": count_items(result.get("difficulties", [])),
-            "platforms": count_items(result.get("platforms", []))
-        }
-    
-    async def search_text(
-        self, 
-        query: str,
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Full-text search on competitions.
-        Requires text index on title and description.
-        """
-        try:
-            # Try text search first
-            cursor = self.collection.find(
-                {"$text": {"$search": query}},
-                {"_id": 0, "score": {"$meta": "textScore"}}
-            ).sort([("score", {"$meta": "textScore"})]).limit(limit)
-            
-            return await cursor.to_list(length=limit)
-        except Exception:
-            # Fallback to regex search if text index not available
-            logger.debug("Falling back to regex search")
-            return await self.find_many(
-                filter_dict={
-                    "$or": [
-                        {"title": {"$regex": query, "$options": "i"}},
-                        {"description": {"$regex": query, "$options": "i"}}
-                    ]
-                },
-                limit=limit
+            # plainto_tsquery treats input as plain text, immune to syntax injection
+            add(
+                "to_tsvector('english', COALESCE(title,'') || ' ' || COALESCE(description,'')) "
+                "@@ plainto_tsquery('english', ?)",
+                search,
             )
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        count_sql = f"SELECT COUNT(*) FROM competitions {where}"
+        list_sql = (
+            f"{_SELECT_ALL} {where} "
+            f"ORDER BY start_date NULLS LAST, id "
+            f"LIMIT ${len(args)+1} OFFSET ${len(args)+2}"
+        )
+
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval(count_sql, *args)
+            rows = await conn.fetch(list_sql, *args, limit, offset)
+        return records_to_dicts(rows), int(total or 0)
+
+    async def get_upcoming(
+        self,
+        days: int = 7,
+        limit: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        """Competitions starting in the next `days` days."""
+        now = datetime.now(timezone.utc)
+        end = now + timedelta(days=days)
+        sql = f"{_SELECT_ALL} WHERE start_date BETWEEN $1 AND $2 ORDER BY start_date"
+        args: list[Any] = [now, end]
+        if limit:
+            sql += f" LIMIT ${len(args)+1}"
+            args.append(limit)
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+        return records_to_dicts(rows)
+
+    async def get_all(self, limit: Optional[int] = None) -> list[dict[str, Any]]:
+        sql = f"{_SELECT_ALL} ORDER BY start_date NULLS LAST, id"
+        args: list[Any] = []
+        if limit:
+            sql += f" LIMIT ${len(args)+1}"
+            args.append(limit)
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+        return records_to_dicts(rows)
+
+    async def count_all(self) -> int:
+        async with self.pool.acquire() as conn:
+            value = await conn.fetchval("SELECT COUNT(*) FROM competitions")
+        return int(value or 0)
+
+    async def get_stats(self) -> dict[str, Any]:
+        """
+        Aggregate counts. Returned shape matches both the existing
+        frontend's expectations (`total_competitions`, `by_category`,
+        `by_difficulty`, `by_platform`) and the response schema
+        (`total`, `categories`, `difficulties`, `platforms`).
+        """
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval("SELECT COUNT(*) FROM competitions")
+            cat_rows = await conn.fetch(
+                "SELECT category, COUNT(*) AS n FROM competitions "
+                "WHERE category IS NOT NULL GROUP BY category"
+            )
+            diff_rows = await conn.fetch(
+                "SELECT difficulty, COUNT(*) AS n FROM competitions "
+                "WHERE difficulty IS NOT NULL GROUP BY difficulty"
+            )
+            plat_rows = await conn.fetch(
+                "SELECT platform, COUNT(*) AS n FROM competitions "
+                "WHERE platform IS NOT NULL GROUP BY platform"
+            )
+
+        categories = {r["category"]: int(r["n"]) for r in cat_rows}
+        difficulties = {r["difficulty"]: int(r["n"]) for r in diff_rows}
+        platforms = {r["platform"]: int(r["n"]) for r in plat_rows}
+        return {
+            "total": int(total or 0),
+            "total_competitions": int(total or 0),
+            "categories": categories,
+            "by_category": categories,
+            "difficulties": difficulties,
+            "by_difficulty": difficulties,
+            "platforms": platforms,
+            "by_platform": platforms,
+        }
+
+    # ---------- writes ----------
+
+    async def upsert_many(self, competitions: list[Any]) -> int:
+        """
+        Bulk upsert in a single transaction. Returns the number of
+        rows successfully written. Items without an id are skipped.
+        """
+        if not competitions:
+            return 0
+
+        rows: list[tuple] = []
+        for c in competitions:
+            if hasattr(c, "to_dict"):
+                c = c.to_dict()
+            if not isinstance(c, dict):
+                continue
+            if not c.get("id") or not c.get("title"):
+                continue
+            try:
+                rows.append(_prepare_competition_row(c))
+            except Exception as e:
+                logger.warning("Skipping malformed competition %s: %s", c.get("id"), e)
+
+        if not rows:
+            return 0
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.executemany(_UPSERT_SQL, rows)
+        return len(rows)

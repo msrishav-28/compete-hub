@@ -1,13 +1,16 @@
-# This file makes the fetchers directory a Python package
-# Initialize the fetchers package
-from .hackathons.hackalist import HackalistFetcher
+"""Fetcher package."""
+from .coding_contests.clist import ClistFetcher
 from .coding_contests.codeforces import CodeforcesFetcher
 from .data_science.kaggle import KaggleFetcher
-from .corporate.hackerrank import HackerRankFetcher
+from .hackathons.devpost import DevpostFetcher
+from .hackathons.mlh import MLHFetcher
+from .hackathons.unstop import UnstopFetcher
 
 __all__ = [
-    'HackalistFetcher',
-    'CodeforcesFetcher',
-    'KaggleFetcher',
-    'HackerRankFetcher'
+    "ClistFetcher",
+    "CodeforcesFetcher",
+    "KaggleFetcher",
+    "DevpostFetcher",
+    "MLHFetcher",
+    "UnstopFetcher",
 ]

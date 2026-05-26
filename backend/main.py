@@ -1,131 +1,143 @@
 """
-CompeteHub API - Clean Architecture
-Routes only - business logic delegated to services layer.
+CompeteHub API.
+
+Routes only — all business logic lives in backend.services.
+Database is Supabase Postgres (asyncpg pool).
 """
-from fastapi import FastAPI, HTTPException, Depends, Query, Body, Request
+import asyncio
+import logging
+import os
+import sys
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Optional
+
+import asyncpg
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from typing import Optional
-from datetime import datetime
-from contextlib import asynccontextmanager
-import logging
-import sys
-import os
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
-# Add project root to path
+# Make project-root imports work for fetchers/models when run directly.
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Core imports
 from backend.core.config import settings
-from backend.core.dependencies import require_db
-
-# Schema imports
+from backend.core.dependencies import (
+    get_current_user_id,
+    get_db_pool,
+    require_admin,
+)
+from backend.database import close_db, connect_to_db, get_pool, is_connected, ping
 from backend.schemas.requests import (
-    UserProfileUpdate,
+    CompetitionEnterRequest,
     CompetitionSaveRequest,
     CompetitionWinRequest,
+    UserProfileUpdate,
 )
-
-# Database imports
-from backend.database import (
-    connect_to_mongo,
-    close_mongo_connection,
-    get_database,
-    is_connected,
-)
-
-# Service imports
 from backend.services.competition_service import CompetitionService
-from backend.services.user_service import UserService
-from backend.services.recommendation_service import RecommendationService
 from backend.services.fetcher_service import FetcherService
+from backend.services.recommendation_service import RecommendationService
+from backend.services.user_service import UserService
 
-# Fetcher imports
+from fetchers.coding_contests.clist import ClistFetcher
 from fetchers.coding_contests.codeforces import CodeforcesFetcher
 from fetchers.data_science.kaggle import KaggleFetcher
-from fetchers.corporate.hackerrank import HackerRankFetcher
-from fetchers.hackathons.hackalist import HackalistFetcher
+from fetchers.hackathons.devpost import DevpostFetcher
+from fetchers.hackathons.mlh import MLHFetcher
+from fetchers.hackathons.unstop import UnstopFetcher
 
-# Model imports
-from models.user_profile import UserProfile
-
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Initialize fetchers
-FETCHERS = {
+FETCHERS: dict = {
     "codeforces": CodeforcesFetcher(),
-    "kaggle": KaggleFetcher(),
-    "hackerrank": HackerRankFetcher(),
-    "hackalist": HackalistFetcher()
+    "clist":      ClistFetcher(),
+    "kaggle":     KaggleFetcher(),
+    "devpost":    DevpostFetcher(),
+    "unstop":     UnstopFetcher(),
+    "mlh":        MLHFetcher(),
 }
 
 
-# ===== DEPENDENCY INJECTION =====
-
-def get_competition_service() -> CompetitionService:
-    """Get competition service instance."""
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    return CompetitionService(db)
+# ---------- service factories ----------
+def comp_svc(pool: asyncpg.Pool = Depends(get_db_pool)) -> CompetitionService:
+    return CompetitionService(pool)
 
 
-def get_user_service() -> UserService:
-    """Get user service instance."""
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    return UserService(db)
+def user_svc(pool: asyncpg.Pool = Depends(get_db_pool)) -> UserService:
+    return UserService(pool)
 
 
-def get_recommendation_service() -> RecommendationService:
-    """Get recommendation service instance."""
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    return RecommendationService(db)
+def reco_svc(pool: asyncpg.Pool = Depends(get_db_pool)) -> RecommendationService:
+    return RecommendationService(pool)
 
 
-def get_fetcher_service() -> FetcherService:
-    """Get fetcher service instance."""
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    return FetcherService(db, FETCHERS)
+def fetcher_svc(pool: asyncpg.Pool = Depends(get_db_pool)) -> FetcherService:
+    return FetcherService(pool, FETCHERS)
 
 
-# ===== LIFESPAN =====
+async def _initial_fetch_if_empty() -> None:
+    """
+    If the competitions table is empty, kick off a background scrape.
+    Runs once per process, never blocks the readiness check.
+    The fetcher's per-source advisory lock makes this safe across workers.
+    """
+    pool = get_pool()
+    if pool is None:
+        return
+    try:
+        async with pool.acquire() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM competitions")
+        if (count or 0) > 0:
+            return
+        logger.info("Competitions table is empty; starting initial background fetch.")
+        f_svc = FetcherService(pool, FETCHERS)
+        await f_svc.fetch_all_sources(force=False)
+    except Exception:
+        logger.exception("Initial fetch failed (non-fatal).")
 
+
+# ---------- lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan - startup and shutdown."""
+    """
+    Open the DB pool on startup. Scraping is deferred to a background
+    task so the health check is reachable immediately — Render's
+    free-tier cold-start tolerance is short.
+    """
     try:
-        await connect_to_mongo()
-        # Pre-fetch competitions on startup
-        if is_connected():
-            fetcher_svc = FetcherService(get_database(), FETCHERS)
-            await fetcher_svc.fetch_all_sources(force=False)
-    except Exception as e:
-        logger.error(f"Startup error: {e}")
+        await connect_to_db()
+    except Exception:
+        logger.exception("Failed to open DB pool at startup; running degraded.")
+
+    fetch_task: Optional[asyncio.Task] = None
+    if is_connected():
+        fetch_task = asyncio.create_task(_initial_fetch_if_empty())
+
     yield
-    await close_mongo_connection()
+
+    if fetch_task and not fetch_task.done():
+        fetch_task.cancel()
+    await close_db()
 
 
-# ===== APP INITIALIZATION =====
+# ---------- app ----------
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title=settings.api_title,
     description=settings.api_description,
     version=settings.api_version,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -136,31 +148,26 @@ app.add_middleware(
 )
 
 
-# ===== EXCEPTION HANDLER =====
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handle uncaught exceptions."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    logger.error("Unhandled exception: %s", exc, exc_info=True)
     detail = str(exc) if settings.is_development else "An unexpected error occurred"
     return JSONResponse(status_code=500, content={"success": False, "error": detail})
 
 
-# ===== COMPETITION ENDPOINTS =====
-
+# ---------- competition endpoints ----------
 @app.get("/api/competitions")
 async def get_competitions(
-    category: Optional[str] = Query(None),
-    difficulty: Optional[str] = Query(None),
-    time_commitment: Optional[str] = Query(None),
+    category: Optional[str] = Query(None, max_length=100),
+    difficulty: Optional[str] = Query(None, max_length=20),
+    time_commitment: Optional[str] = Query(None, max_length=20),
     search: Optional[str] = Query(None, max_length=200),
-    platform: Optional[str] = Query(None),
+    platform: Optional[str] = Query(None, max_length=50),
     recruitment_only: bool = Query(False),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    service: CompetitionService = Depends(get_competition_service)
+    service: CompetitionService = Depends(comp_svc),
 ):
-    """Get filtered and paginated competitions."""
     return await service.get_competitions(
         category=category,
         difficulty=difficulty,
@@ -169,24 +176,20 @@ async def get_competitions(
         recruitment_only=recruitment_only,
         search=search,
         limit=limit,
-        offset=offset
+        offset=offset,
     )
 
 
 @app.get("/api/competitions/upcoming/week")
-async def get_upcoming_week(
-    service: CompetitionService = Depends(get_competition_service)
-):
-    """Get competitions starting in the next 7 days."""
+async def get_upcoming_week(service: CompetitionService = Depends(comp_svc)):
     return await service.get_upcoming_week()
 
 
 @app.get("/api/competitions/{competition_id}")
 async def get_competition_by_id(
     competition_id: str,
-    service: CompetitionService = Depends(get_competition_service)
+    service: CompetitionService = Depends(comp_svc),
 ):
-    """Get a single competition by ID."""
     comp = await service.get_competition_by_id(competition_id)
     if not comp:
         raise HTTPException(status_code=404, detail="Competition not found")
@@ -194,159 +197,148 @@ async def get_competition_by_id(
 
 
 @app.get("/api/stats/overview")
-async def get_stats_overview(
-    service: CompetitionService = Depends(get_competition_service)
-):
-    """Get competition statistics."""
+async def get_stats_overview(service: CompetitionService = Depends(comp_svc)):
     return await service.get_stats_overview()
 
 
-# ===== USER ENDPOINTS =====
-
+# ---------- user endpoints ----------
 @app.get("/api/users/profile")
 async def get_profile(
-    user_id: str = Query("default_user", max_length=100),
-    service: UserService = Depends(get_user_service)
+    user_id: str = Depends(get_current_user_id),
+    service: UserService = Depends(user_svc),
 ):
-    """Get user profile."""
     return await service.get_user_profile(user_id)
 
 
 @app.post("/api/users/profile")
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def update_profile(
+    request: Request,
     profile_update: UserProfileUpdate,
-    user_id: str = Query("default_user", max_length=100),
-    service: UserService = Depends(get_user_service)
+    user_id: str = Depends(get_current_user_id),
+    service: UserService = Depends(user_svc),
 ):
-    """Create or update user profile."""
-    updates = profile_update.dict(exclude_unset=True)
+    updates = profile_update.model_dump(exclude_unset=True)
     return await service.update_user_profile(user_id, updates)
 
 
 @app.post("/api/users/competition/save")
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def save_competition(
-    request: CompetitionSaveRequest,
-    user_id: str = Query("default_user", max_length=100),
-    service: UserService = Depends(get_user_service)
+    request: Request,
+    body: CompetitionSaveRequest,
+    user_id: str = Depends(get_current_user_id),
+    service: UserService = Depends(user_svc),
 ):
-    """Save or unsave a competition."""
-    return await service.save_competition(user_id, request.comp_id, request.save)
+    return await service.save_competition(user_id, body.comp_id, body.save)
 
 
 @app.post("/api/users/competition/enter")
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def enter_competition(
-    comp_id: str = Body(..., embed=True),
-    user_id: str = Query("default_user", max_length=100),
+    request: Request,
+    body: dict = Body(...),
+    user_id: str = Depends(get_current_user_id),
+    service: UserService = Depends(user_svc),
 ):
-    """Mark a competition as entered."""
-    db = get_database()
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    
-    users_col = db.users
-    user = await users_col.find_one({"user_id": user_id})
-    
-    if user:
-        profile = UserProfile.from_dict(user)
-    else:
-        profile = UserProfile(user_id=user_id)
-    
-    profile.add_competition_entry(comp_id.strip().strip('"'), status='registered')
-    
-    await users_col.update_one(
-        {"user_id": user_id},
-        {"$set": profile.to_dict()},
-        upsert=True
-    )
-    
-    return {"success": True, "message": "Competition entry recorded"}
+    """
+    Accept both shapes:
+      - The current frontend posts `JSON.stringify(compId)` -> a bare string body
+      - Well-behaved clients post `{"comp_id": "..."}`
+    Either way, we resolve to a single string and route through the service.
+    """
+    comp_id: Optional[str] = None
+    if isinstance(body, str):
+        comp_id = body.strip()
+    elif isinstance(body, dict):
+        raw = body.get("comp_id") or body.get("competition_id")
+        if isinstance(raw, str):
+            comp_id = raw.strip()
+    if not comp_id:
+        raise HTTPException(status_code=422, detail="comp_id is required")
+    return await service.enter_competition(user_id, comp_id)
 
 
 @app.post("/api/users/competition/win")
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def record_win(
-    request: CompetitionWinRequest,
-    user_id: str = Query("default_user", max_length=100),
-    service: UserService = Depends(get_user_service)
+    request: Request,
+    body: CompetitionWinRequest,
+    user_id: str = Depends(get_current_user_id),
+    service: UserService = Depends(user_svc),
 ):
-    """Record a competition win."""
-    return await service.record_win(user_id, request.comp_id, request.placement)
+    return await service.record_win(user_id, body.comp_id, body.placement)
 
 
-# ===== RECOMMENDATION ENDPOINTS =====
-
+# ---------- recommendations / analytics ----------
 @app.get("/api/recommendations")
 async def get_recommendations(
-    user_id: str = Query("default_user", max_length=100),
+    user_id: str = Depends(get_current_user_id),
     limit: int = Query(10, ge=1, le=50),
-    service: RecommendationService = Depends(get_recommendation_service)
+    service: RecommendationService = Depends(reco_svc),
 ):
-    """Get personalized competition recommendations."""
     return await service.get_recommendations(user_id, limit)
 
 
-# ===== ANALYTICS ENDPOINTS =====
-
 @app.get("/api/analytics/user")
 async def get_user_analytics(
-    user_id: str = Query("default_user", max_length=100),
-    service: UserService = Depends(get_user_service)
+    user_id: str = Depends(get_current_user_id),
+    service: UserService = Depends(user_svc),
 ):
-    """Get user's competition analytics."""
     return await service.get_user_analytics(user_id)
 
 
-# ===== REFRESH ENDPOINT =====
-
+# ---------- refresh (admin-gated) ----------
 @app.post("/api/refresh")
+@limiter.limit(f"{settings.rate_limit_refresh_per_hour}/hour")
 async def refresh_competitions(
-    service: FetcherService = Depends(get_fetcher_service)
+    request: Request,
+    _: None = Depends(require_admin),
+    service: FetcherService = Depends(fetcher_svc),
 ):
-    """Manually trigger a refresh of all competitions."""
     result = await service.fetch_all_sources(force=True)
-    result["timestamp"] = datetime.now().isoformat()
+    result["timestamp"] = datetime.now(timezone.utc).isoformat()
     return result
 
 
-# ===== HEALTH CHECK =====
+@app.get("/api/refresh/status")
+async def refresh_status(
+    _: None = Depends(require_admin),
+    service: FetcherService = Depends(fetcher_svc),
+):
+    return await service.get_source_status()
 
+
+# ---------- health & root ----------
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    db_connected = is_connected()
-    
-    if db_connected:
-        try:
-            db = get_database()
-            await db.command('ping')
-        except Exception:
-            db_connected = False
-    
-    return {
-        "status": "healthy" if db_connected else "degraded",
-        "timestamp": datetime.utcnow().isoformat(),
+    db_ok = await ping() if is_connected() else False
+    payload = {
+        "status": "healthy" if db_ok else "degraded",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": settings.api_version,
         "environment": settings.environment,
-        "database": {"connected": db_connected, "name": settings.db_name},
-        "fetchers": {"count": len(FETCHERS), "sources": list(FETCHERS.keys())}
+        "database": {"connected": db_ok},
+        "fetchers": {"count": len(FETCHERS), "sources": list(FETCHERS.keys())},
     }
+    # Return 503 when degraded so the load balancer routes traffic away.
+    status_code = 200 if db_ok else 503
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 @app.get("/")
 async def root():
-    """Root endpoint with API information."""
     return {
         "name": settings.api_title,
         "version": settings.api_version,
         "description": settings.api_description,
         "documentation": "/docs",
-        "health": "/health"
+        "health": "/health",
     }
 
 
-# ===== RUN =====
-
+# ---------- run ----------
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=settings.is_development)
-
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=settings.is_development)

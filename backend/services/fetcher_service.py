@@ -1,258 +1,184 @@
 """
-Fetcher service - Orchestrates data fetching from external sources.
-Manages fetcher lifecycle, caching, and data synchronization.
-"""
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
-import logging
-import asyncio
+Fetcher orchestration.
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+Fetchers are sync (use `requests`/`BeautifulSoup`), so we run each one
+in a thread executor. Concurrency safety:
+
+  - Per-source advisory lock (pg_try_advisory_lock) means if two
+    requests trigger a refresh of the same source at the same time,
+    only one actually scrapes. The other returns immediately as "in-progress".
+  - Cross-process safety (multiple uvicorn/gunicorn workers) is also
+    guaranteed by the advisory lock — it's a server-level lock, not
+    process-level.
+"""
+import asyncio
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+import asyncpg
+
+from backend.repositories.competition_repository import CompetitionRepository
 
 logger = logging.getLogger(__name__)
 
+# Per-source hard ceiling. A scrape that exceeds this is treated as
+# stuck rather than slow — better to emit a "timeout" status row than
+# pin a worker.
+_FETCH_TIMEOUT_SECONDS = 60
+
+
+def _lock_key(source: str) -> int:
+    """
+    Map a source name to a stable 31-bit integer for pg_try_advisory_lock(int).
+
+    NOTE: Python's built-in hash() randomizes string hashes per process,
+    so two gunicorn workers would get DIFFERENT keys for the same source
+    — defeating cross-worker safety. We use a stable hash instead.
+    Collisions across our ~5 sources are vanishingly unlikely.
+    """
+    import hashlib
+    digest = hashlib.blake2b(source.encode("utf-8"), digest_size=4).digest()
+    return int.from_bytes(digest, "big") & 0x7FFFFFFF
+
 
 class FetcherService:
-    """Service for managing competition data fetching."""
-    
-    def __init__(self, db: AsyncIOMotorDatabase, fetchers: Dict[str, Any]):
-        """
-        Initialize fetcher service.
-        
-        Args:
-            db: Database connection
-            fetchers: Dict of fetcher instances keyed by source name
-        """
-        self.db = db
+    def __init__(self, pool: asyncpg.Pool, fetchers: dict[str, Any]):
+        self.pool = pool
         self.fetchers = fetchers
-        self.metadata_collection = db.metadata if db else None
-        self.competitions_collection = db.competitions if db else None
-    
-    async def is_source_fresh(
-        self, 
-        source: str, 
-        ttl_hours: int = 24
-    ) -> bool:
-        """Check if a source's data is still fresh."""
-        if not self.metadata_collection:
-            return False
-        
-        try:
-            metadata = await self.metadata_collection.find_one({"_id": source})
-            if not metadata:
-                return False
-            
-            last_updated = metadata.get("last_updated")
-            if not last_updated:
-                return False
-            
-            if isinstance(last_updated, str):
-                last_updated = datetime.fromisoformat(last_updated)
-            
-            return datetime.now() - last_updated < timedelta(hours=ttl_hours)
-        except Exception as e:
-            logger.warning(f"Error checking source freshness for {source}: {e}")
-            return False
-    
-    async def update_source_metadata(
-        self, 
-        source: str,
-        count: int = 0
-    ) -> None:
-        """Update the last_updated timestamp for a source."""
-        if not self.metadata_collection:
-            return
-        
-        try:
-            await self.metadata_collection.update_one(
-                {"_id": source},
-                {
-                    "$set": {
-                        "last_updated": datetime.now(),
-                        "competition_count": count
-                    }
-                },
-                upsert=True
+        self.repo = CompetitionRepository(pool)
+
+    # ---------- freshness ----------
+
+    async def is_source_fresh(self, source: str, ttl_hours: int = 24) -> bool:
+        async with self.pool.acquire() as conn:
+            last = await conn.fetchval(
+                "SELECT last_updated FROM fetcher_metadata WHERE source = $1",
+                source,
             )
-        except Exception as e:
-            logger.warning(f"Error updating metadata for {source}: {e}")
-    
-    async def fetch_from_source(
-        self, 
+        if not last:
+            return False
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - last < timedelta(hours=ttl_hours)
+
+    async def _update_metadata(
+        self,
         source: str,
-        force: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Fetch competitions from a specific source.
-        
-        Args:
-            source: Source name (e.g., "codeforces", "kaggle")
-            force: Force refresh even if cache is fresh
-            
-        Returns:
-            Dict with status and count of fetched competitions
-        """
-        if source not in self.fetchers:
-            return {
-                "success": False,
-                "error": f"Unknown source: {source}",
-                "source": source
-            }
-        
-        # Check if refresh is needed
-        if not force and await self.is_source_fresh(source):
-            logger.info(f"Source {source} is fresh, skipping fetch")
-            return {
-                "success": True,
-                "source": source,
-                "skipped": True,
-                "message": "Data is still fresh"
-            }
-        
-        try:
-            logger.info(f"Fetching data from {source}...")
-            fetcher = self.fetchers[source]
-            
-            # Run fetcher (may be sync or async)
-            if asyncio.iscoroutinefunction(fetcher.run):
-                competitions = await fetcher.run()
-            else:
-                # Run sync fetcher in thread pool
-                loop = asyncio.get_event_loop()
-                competitions = await loop.run_in_executor(None, fetcher.run)
-            
-            if not competitions:
-                logger.warning(f"No competitions fetched from {source}")
-                return {
-                    "success": True,
-                    "source": source,
-                    "count": 0,
-                    "message": "No competitions found"
-                }
-            
-            # Store in database
-            count = await self._store_competitions(competitions)
-            
-            # Update metadata
-            await self.update_source_metadata(source, count)
-            
-            logger.info(f"Successfully fetched {count} competitions from {source}")
-            
-            return {
-                "success": True,
-                "source": source,
-                "count": count,
-                "message": f"Fetched {count} competitions"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching from {source}: {e}")
-            return {
-                "success": False,
-                "source": source,
-                "error": str(e)
-            }
-    
-    async def fetch_all_sources(
-        self, 
+        *,
+        count: int = 0,
+        status: str = "ok",
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO fetcher_metadata (source, last_updated, competition_count, last_status)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (source) DO UPDATE
+                  SET last_updated = EXCLUDED.last_updated,
+                      competition_count = EXCLUDED.competition_count,
+                      last_status = EXCLUDED.last_status
+                """,
+                source, datetime.now(timezone.utc), count, status,
+            )
+
+    # ---------- one source ----------
+
+    async def fetch_from_source(
+        self,
+        source: str,
         force: bool = False,
-        sources: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        """
-        Fetch from all configured sources.
-        
-        Args:
-            force: Force refresh all sources
-            sources: Optional list of specific sources to refresh
-            
-        Returns:
-            Dict with results for each source
-        """
-        target_sources = sources or list(self.fetchers.keys())
-        results = {}
-        
-        total_count = 0
-        success_count = 0
-        
-        for source in target_sources:
-            result = await self.fetch_from_source(source, force)
-            results[source] = result
-            
-            if result.get("success"):
-                success_count += 1
-                total_count += result.get("count", 0)
-        
-        return {
-            "success": True,
-            "sources_processed": len(target_sources),
-            "sources_successful": success_count,
-            "total_competitions": total_count,
-            "details": results
-        }
-    
-    async def _store_competitions(
-        self, 
-        competitions: List[Any]
-    ) -> int:
-        """Store competitions in database."""
-        if not self.competitions_collection:
-            return 0
-        
-        count = 0
-        for comp in competitions:
+        ttl_hours: int = 24,
+    ) -> dict[str, Any]:
+        if source not in self.fetchers:
+            return {"success": False, "source": source, "error": f"Unknown source: {source}"}
+
+        if not force and await self.is_source_fresh(source, ttl_hours):
+            return {"success": True, "source": source, "skipped": True, "message": "Data is still fresh"}
+
+        # Hold the advisory lock for the duration of the scrape. If another
+        # worker is already scraping this source, return immediately.
+        key = _lock_key(source)
+        async with self.pool.acquire() as conn:
+            got_lock = await conn.fetchval("SELECT pg_try_advisory_lock($1)", key)
+            if not got_lock:
+                return {"success": True, "source": source, "skipped": True, "message": "Already in progress"}
             try:
-                # Convert to dict if needed
-                if hasattr(comp, "to_dict"):
-                    comp_dict = comp.to_dict()
-                elif hasattr(comp, "dict"):
-                    comp_dict = comp.dict()
-                else:
-                    comp_dict = comp
-                
-                comp_id = comp_dict.get("id")
-                if not comp_id:
-                    logger.warning("Skipping competition without ID")
-                    continue
-                
-                await self.competitions_collection.update_one(
-                    {"id": comp_id},
-                    {"$set": comp_dict},
-                    upsert=True
-                )
-                count += 1
-                
-            except Exception as e:
-                logger.warning(f"Error storing competition: {e}")
-                continue
-        
-        return count
-    
-    async def get_source_status(self) -> Dict[str, Any]:
-        """Get status of all configured sources."""
-        status = {}
-        
-        for source in self.fetchers.keys():
-            is_fresh = await self.is_source_fresh(source)
-            
-            # Get last update time
-            metadata = None
-            if self.metadata_collection:
                 try:
-                    metadata = await self.metadata_collection.find_one({"_id": source})
-                except Exception:
-                    pass
-            
-            status[source] = {
-                "is_fresh": is_fresh,
-                "last_updated": metadata.get("last_updated") if metadata else None,
-                "competition_count": metadata.get("competition_count", 0) if metadata else 0
-            }
-        
+                    fetcher = self.fetchers[source]
+                    logger.info("Fetching from %s...", source)
+                    if asyncio.iscoroutinefunction(fetcher.run):
+                        competitions = await asyncio.wait_for(
+                            fetcher.run(), timeout=_FETCH_TIMEOUT_SECONDS
+                        )
+                    else:
+                        competitions = await asyncio.wait_for(
+                            asyncio.get_event_loop().run_in_executor(None, fetcher.run),
+                            timeout=_FETCH_TIMEOUT_SECONDS,
+                        )
+
+                    if not competitions:
+                        await self._update_metadata(source, count=0, status="empty")
+                        return {"success": True, "source": source, "count": 0, "message": "No competitions found"}
+
+                    written = await self.repo.upsert_many(competitions)
+                    await self._update_metadata(source, count=written, status="ok")
+                    logger.info("Wrote %d competitions from %s", written, source)
+                    return {"success": True, "source": source, "count": written, "message": f"Fetched {written} competitions"}
+                except asyncio.TimeoutError:
+                    logger.warning("Fetcher %s timed out after %ds", source, _FETCH_TIMEOUT_SECONDS)
+                    await self._update_metadata(source, count=0, status="timeout")
+                    return {"success": False, "source": source, "error": f"timeout after {_FETCH_TIMEOUT_SECONDS}s"}
+                except Exception as e:
+                    logger.exception("Fetcher %s failed", source)
+                    await self._update_metadata(source, count=0, status=f"error: {e}")
+                    return {"success": False, "source": source, "error": str(e)}
+            finally:
+                await conn.execute("SELECT pg_advisory_unlock($1)", key)
+
+    # ---------- all sources ----------
+
+    async def fetch_all_sources(
+        self,
+        force: bool = False,
+        sources: Optional[list[str]] = None,
+        ttl_hours: int = 24,
+    ) -> dict[str, Any]:
+        target = sources or list(self.fetchers.keys())
+        results: dict[str, dict[str, Any]] = {}
+        total = 0
+        successes = 0
+        for source in target:
+            r = await self.fetch_from_source(source, force=force, ttl_hours=ttl_hours)
+            results[source] = r
+            if r.get("success"):
+                successes += 1
+                total += int(r.get("count", 0))
         return {
             "success": True,
-            "sources": status
+            "sources_processed": len(target),
+            "sources_successful": successes,
+            "total_competitions": total,
+            "details": results,
         }
-    
-    def get_available_sources(self) -> List[str]:
-        """Get list of available fetcher sources."""
-        return list(self.fetchers.keys())
+
+    # ---------- status ----------
+
+    async def get_source_status(self) -> dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT source, last_updated, competition_count, last_status FROM fetcher_metadata"
+            )
+        by_source = {r["source"]: dict(r) for r in rows}
+
+        status: dict[str, Any] = {}
+        for source in self.fetchers.keys():
+            md = by_source.get(source)
+            fresh = await self.is_source_fresh(source) if md else False
+            status[source] = {
+                "is_fresh": fresh,
+                "last_updated": md["last_updated"].isoformat() if md and md.get("last_updated") else None,
+                "competition_count": int(md["competition_count"]) if md else 0,
+                "last_status": md.get("last_status") if md else None,
+            }
+        return {"success": True, "sources": status}

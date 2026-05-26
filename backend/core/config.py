@@ -2,103 +2,90 @@
 Application configuration using Pydantic Settings.
 Single source of truth for all configuration values.
 """
-import os
 from functools import lru_cache
 from typing import List, Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
-    """Application settings with environment variable support."""
-    
+    """Application settings loaded from environment / .env file."""
+
     # Environment
-    environment: str = Field(default="development", env="ENVIRONMENT")
-    debug: bool = Field(default=False, env="DEBUG")
-    
-    # Database
-    mongodb_url: Optional[str] = Field(default=None, env="MONGODB_URL")
-    db_name: str = Field(default="competehub", env="DB_NAME")
-    
-    # MongoDB connection pool settings
-    mongo_max_pool_size: int = Field(default=50, env="MONGO_MAX_POOL_SIZE")
-    mongo_min_pool_size: int = Field(default=10, env="MONGO_MIN_POOL_SIZE")
-    mongo_server_selection_timeout_ms: int = Field(default=5000)
-    mongo_connect_timeout_ms: int = Field(default=10000)
-    mongo_socket_timeout_ms: int = Field(default=30000)
-    
+    environment: str = Field(default="development")
+    debug: bool = Field(default=False)
+
+    # Database (Supabase Postgres direct connection string)
+    # postgresql://postgres:<password>@db.<project>.supabase.co:5432/postgres
+    database_url: Optional[str] = Field(default=None)
+
+    # Connection pool
+    db_pool_min_size: int = Field(default=2)
+    db_pool_max_size: int = Field(default=10)
+    db_command_timeout: int = Field(default=30)
+
     # CORS
-    cors_origins: str = Field(default="http://localhost:3000", env="CORS_ORIGINS")
-    
-    # API Settings
+    cors_origins: str = Field(default="http://localhost:3000")
+
+    # API
     api_title: str = "CompeteHub API"
-    api_version: str = "2.0.0"
-    api_description: str = "Comprehensive API for discovering, tracking, and analyzing competitions"
-    
-    # Cache settings
-    cache_ttl_hours: int = Field(default=24, env="CACHE_TTL_HOURS")
-    
-    # Rate limiting
-    rate_limit_requests: int = Field(default=100, env="RATE_LIMIT_REQUESTS")
-    rate_limit_window_seconds: int = Field(default=60, env="RATE_LIMIT_WINDOW")
-    
+    api_version: str = "2.1.0"
+    api_description: str = "Discover, track, and analyze engineering competitions."
+
+    # Cache TTL for fetcher data
+    cache_ttl_hours: int = Field(default=24)
+
+    # Rate limiting (per-IP, per-window)
+    rate_limit_per_minute: int = Field(default=60)
+    rate_limit_refresh_per_hour: int = Field(default=5)
+
+    # Admin key required to trigger /api/refresh.
+    # If unset in production we refuse the call rather than leave it open.
+    admin_key: Optional[str] = Field(default=None)
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
-    
+
     @property
     def is_development(self) -> bool:
         return self.environment == "development"
-    
+
     @property
     def cors_origins_list(self) -> List[str]:
-        """Parse CORS origins from comma-separated string."""
-        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-        
-        # Add localhost variations in development
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
         if self.is_development:
-            dev_origins = [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-            ]
-            origins.extend([o for o in dev_origins if o not in origins])
-        
+            for dev in ("http://localhost:3000", "http://127.0.0.1:3000",
+                        "http://localhost:5173", "http://127.0.0.1:5173"):
+                if dev not in origins:
+                    origins.append(dev)
         return origins
-    
-    @property
-    def mongo_options(self) -> dict:
-        """Get MongoDB connection options."""
-        return {
-            "serverSelectionTimeoutMS": self.mongo_server_selection_timeout_ms,
-            "connectTimeoutMS": self.mongo_connect_timeout_ms,
-            "socketTimeoutMS": self.mongo_socket_timeout_ms,
-            "maxPoolSize": self.mongo_max_pool_size,
-            "minPoolSize": self.mongo_min_pool_size,
-            "retryWrites": True,
-            "retryReads": True,
-        }
-    
-    @validator("mongodb_url", pre=True)
-    def validate_mongodb_url(cls, v):
-        if v and ("<password>" in v or "<username>" in v):
-            raise ValueError("MongoDB URL contains unreplaced placeholders")
-        if v and "cluster0.example.mongodb.net" in v:
-            raise ValueError("MongoDB URL contains placeholder value")
+
+    @field_validator("database_url")
+    @classmethod
+    def _check_db_url(cls, v: Optional[str]) -> Optional[str]:
+        if v and ("<password>" in v or "<project>" in v):
+            raise ValueError("DATABASE_URL still contains placeholder values")
         return v
-    
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _check_cors(cls, v: str) -> str:
+        # Reject wildcard — we use allow_credentials=True which is unsafe with "*"
+        if v.strip() == "*":
+            raise ValueError("CORS_ORIGINS='*' is unsafe with credentials. List explicit origins.")
+        return v
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance (singleton pattern)."""
     return Settings()
 
 
-# Global settings instance
 settings = get_settings()

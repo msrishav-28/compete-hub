@@ -1,28 +1,23 @@
-# Core Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
+# Core
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
 gunicorn==21.2.0
 
-# Data Validation
-pydantic==2.4.2
-pydantic-settings==2.1.0
+# Data validation / settings
+pydantic==2.6.4
+pydantic-settings==2.2.1
 
-# Database
-motor==3.3.1
-dnspython==2.4.2
+# Postgres (Supabase) via asyncpg
+asyncpg==0.29.0
 
-# HTTP & Scraping
+# Rate limiting
+slowapi==0.1.9
+
+# HTTP + scraping (used by fetchers)
 requests==2.31.0
-httpx==0.25.1
-beautifulsoup4==4.12.2
-lxml==4.9.3
+beautifulsoup4==4.12.3
+lxml==5.1.0
 
 # Utilities
-python-dotenv==1.0.0
+python-dotenv==1.0.1
 python-dateutil==2.8.2
-pytz==2023.3.post1
-
-# Auth (keep for future use)
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6

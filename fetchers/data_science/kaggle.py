@@ -1,127 +1,172 @@
-import requests
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from models.competition import Competition, CompetitionCategory, DifficultyLevel
-from ..base_fetcher import BaseFetcher
+"""
+Kaggle competitions fetcher.
+
+Kaggle's public unauthenticated endpoint now returns 401. Their
+official API requires a username/key pair (free, get one at
+https://www.kaggle.com/settings/account → "Create New Token").
+
+If `KAGGLE_USERNAME` and `KAGGLE_KEY` are set, we authenticate and
+fetch normally. Otherwise we cleanly emit zero competitions — the
+fetcher service logs this as "empty" status rather than an error.
+"""
 import logging
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+import requests
+
+from fetchers.base_fetcher import BaseFetcher
+from models.competition import (
+    Competition,
+    CompetitionCategory,
+    DifficultyLevel,
+)
 
 logger = logging.getLogger(__name__)
 
+
 class KaggleFetcher(BaseFetcher):
-    """Fetches data science competitions from Kaggle API"""
-    
+    """Fetches data-science competitions from Kaggle's official API."""
+
     def __init__(self):
         super().__init__("Kaggle")
         self.base_url = "https://www.kaggle.com/api/v1/competitions"
         self.session = requests.Session()
         self.session.headers.update({
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (CompeteHub/1.0)",
         })
-    
+
+    def _credentials(self) -> Optional[tuple[str, str]]:
+        username = os.getenv("KAGGLE_USERNAME")
+        key = os.getenv("KAGGLE_KEY")
+        if username and key:
+            return username, key
+        return None
+
     def fetch(self) -> List[Dict[str, Any]]:
-        """Fetch competitions from Kaggle API"""
+        creds = self._credentials()
+        if not creds:
+            logger.info(
+                "Kaggle: KAGGLE_USERNAME/KAGGLE_KEY not configured; skipping. "
+                "Set them in env to enable this source."
+            )
+            return []
+
         try:
-            # Kaggle's API doesn't require authentication for public data
-            response = self.session.get(
+            resp = self.session.get(
                 f"{self.base_url}/list",
                 params={"sortBy": "latestDeadline"},
-                timeout=15
+                auth=creds,
+                timeout=15,
             )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Error fetching from Kaggle: {e}")
+            resp.raise_for_status()
+            return resp.json() or []
+        except requests.HTTPError as e:
+            logger.error("Kaggle API error: %s", e)
             return []
-    
+        except Exception as e:
+            logger.error("Kaggle fetch failed: %s", e)
+            return []
+
     def parse(self, data: List[Dict[str, Any]]) -> List[Competition]:
-        """Parse Kaggle competitions into Competition objects"""
-        competitions = []
-        now = datetime.utcnow()
-        
-        for comp_data in data:
+        competitions: List[Competition] = []
+        now = datetime.now(timezone.utc)
+
+        for raw in data:
             try:
-                # Skip if not active or upcoming
-                if comp_data.get('status') not in ['active', 'completed']:
-                    continue
-                
-                # Parse dates
-                deadline_str = comp_data.get('deadline')
-                enabled_date_str = comp_data.get('enabledDate')
-                
-                if not deadline_str or not enabled_date_str:
-                    continue
-                    
-                try:
-                    end_date = datetime.strptime(deadline_str, "%Y-%m-%dT%H:%M:%S.%fZ")
-                    start_date = datetime.strptime(enabled_date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
-                    
-                    # Skip if competition has already ended
-                    if end_date < now:
+                if raw.get("status") not in ("active", "ongoing", "open"):
+                    # Kaggle uses several status strings; "completed" we skip.
+                    if (raw.get("status") or "").lower() == "completed":
                         continue
-                except (ValueError, TypeError):
+
+                deadline = self._parse_dt(raw.get("deadline"))
+                enabled = self._parse_dt(raw.get("enabledDate"))
+                if not deadline or not enabled:
                     continue
-                
-                # Create competition object
+                if deadline < now:
+                    continue
+
                 comp = Competition()
-                comp.id = f"kaggle_{comp_data.get('id')}"
-                comp.title = comp_data.get('title', 'Kaggle Competition')
-                comp.description = comp_data.get('description', '')
+                comp.id = f"kaggle_{raw.get('id') or raw.get('url') or raw.get('ref')}"
+                comp.title = raw.get("title", "Kaggle Competition")
+                comp.description = (raw.get("description") or "")[:1000]
                 comp.category = CompetitionCategory.KAGGLE
                 comp.platform = "Kaggle"
-                comp.company = comp_data.get('organizationName', 'Kaggle')
-                
-                # Set difficulty based on reward
-                reward = comp_data.get('reward', 0)
-                if reward >= 10000:
+                comp.company = raw.get("organizationName") or "Kaggle"
+
+                reward = raw.get("reward") or 0
+                try:
+                    reward = int(reward)
+                except (TypeError, ValueError):
+                    reward = 0
+
+                if reward >= 50_000:
                     comp.difficulty = DifficultyLevel.EXPERT
-                elif reward >= 5000:
+                elif reward >= 10_000:
                     comp.difficulty = DifficultyLevel.ADVANCED
-                elif reward >= 1000:
+                elif reward >= 1_000:
                     comp.difficulty = DifficultyLevel.INTERMEDIATE
                 else:
                     comp.difficulty = DifficultyLevel.BEGINNER
-                
-                # Set dates and duration
-                comp.start_date = start_date
-                comp.end_date = end_date
-                comp.duration_hours = (end_date - start_date).total_seconds() / 3600
-                comp.registration_deadline = end_date - timedelta(days=7)  # Approximate
-                
-                # Set other properties
-                comp.link = f"https://kaggle.com/c/{comp_data.get('url', '')}"
-                comp.team_size = "team" if comp_data.get('teamCount', 1) > 1 else "solo"
-                comp.time_commitment = "high"  # Most Kaggle competitions are long-term
-                comp.skills_required = ["Data Science", "Machine Learning", "Python", "Data Analysis"]
-                
-                # Add tags based on competition title
+
+                comp.start_date = enabled
+                comp.end_date = deadline
+                comp.duration_hours = round((deadline - enabled).total_seconds() / 3600, 2)
+                # Registration usually closes shortly before deadline.
+                comp.registration_deadline = max(enabled, deadline - timedelta(days=7))
+
+                url = raw.get("url") or ""
+                comp.link = f"https://kaggle.com/c/{url}" if url else "https://kaggle.com/competitions"
+                comp.team_size = "team" if (raw.get("teamCount") or 1) > 1 else "solo"
+                comp.time_commitment = "high"
+                comp.skills_required = ["Data Science", "Machine Learning", "Python"]
+
                 tags = ["data science", "machine learning", "kaggle"]
                 title_lower = comp.title.lower()
-                if any(x in title_lower for x in ['nlp', 'natural language']):
-                    tags.extend(['nlp', 'text processing'])
-                if any(x in title_lower for x in ['cv', 'computer vision', 'image']):
-                    tags.extend(['computer vision', 'image processing'])
-                if any(x in title_lower for x in ['tabular', 'structured']):
-                    tags.append('tabular data')
-                
-                comp.tags = list(set(tags))  # Remove duplicates
-                comp.portfolio_value = 80  # Kaggle competitions are highly valued
-                comp.recruitment_potential = True
-                comp.companies_recruiting = ["Top Tech Companies"]
+                for kw, extra in (
+                    (("nlp", "natural language"), ["nlp"]),
+                    (("vision", "image", "cv "), ["computer vision"]),
+                    (("tabular", "structured"), ["tabular"]),
+                    (("forecast", "time series"), ["time series"]),
+                ):
+                    if any(k in title_lower for k in kw):
+                        tags.extend(extra)
+                comp.tags = list(dict.fromkeys(tags))
+
+                comp.portfolio_value = 80
+                comp.recruitment_potential = reward >= 5_000
+                comp.companies_recruiting = [comp.company] if comp.company else []
                 comp.source = "Kaggle API"
-                
-                # Add prize information
                 if reward > 0:
-                    comp.prize = {
-                        "type": "cash",
-                        "value": reward,
-                        "currency": "USD"
-                    }
-                
+                    comp.prize = {"type": "cash", "value": reward, "currency": "USD"}
+
                 competitions.append(comp)
-                
-            except Exception as e:
-                logger.error(f"Error parsing Kaggle competition {comp_data.get('id')}: {e}")
-                continue
-        
+            except Exception:
+                logger.exception("Failed to parse Kaggle competition id=%s", raw.get("id"))
         return competitions
+
+    @staticmethod
+    def _parse_dt(value: Any) -> Optional[datetime]:
+        if not value:
+            return None
+        # Kaggle uses "2024-12-31T23:59:59.000Z" or similar.
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if not isinstance(value, str):
+            return None
+        v = value.replace("Z", "+00:00")
+        for fmt in (None,):  # Try fromisoformat first
+            try:
+                dt = datetime.fromisoformat(v)
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                dt = datetime.strptime(value.replace("Z", "+0000"), fmt)
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        return None

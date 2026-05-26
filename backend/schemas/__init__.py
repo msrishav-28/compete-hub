@@ -1,9 +1,9 @@
-# Schema/DTO layer for request/response validation
 from .requests import (
     UserProfileUpdate,
     CompetitionSaveRequest,
+    CompetitionEnterRequest,
     CompetitionWinRequest,
-    CompetitionFilterParams,
+    RefreshRequest,
 )
 from .responses import (
     SuccessResponse,
@@ -12,19 +12,24 @@ from .responses import (
     CompetitionResponse,
     UserProfileResponse,
     StatsResponse,
+    AnalyticsResponse,
+    RecommendationResponse,
+    HealthResponse,
 )
 
 __all__ = [
-    # Requests
     "UserProfileUpdate",
-    "CompetitionSaveRequest", 
+    "CompetitionSaveRequest",
+    "CompetitionEnterRequest",
     "CompetitionWinRequest",
-    "CompetitionFilterParams",
-    # Responses
+    "RefreshRequest",
     "SuccessResponse",
     "PaginatedResponse",
     "ErrorResponse",
     "CompetitionResponse",
     "UserProfileResponse",
     "StatsResponse",
+    "AnalyticsResponse",
+    "RecommendationResponse",
+    "HealthResponse",
 ]
